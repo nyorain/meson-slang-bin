@@ -1,0 +1,2 @@
+v2024.14.5
+from https://github.com/shader-slang/slang/releases/tag/v2024.14.5
