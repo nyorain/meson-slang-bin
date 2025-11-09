@@ -38,10 +38,6 @@
 #define SLANG_OFFSET_OF(type, member) (size_t)((char*)&(((type*)0)->member) - (char*)0)
 #endif
 
-#ifndef SLANG_ALIGN_OF
-#define SLANG_ALIGN_OF(type) __alignof__(type)
-#endif
-
 // Must be large enough to cause overflow and therefore infinity
 #ifndef SLANG_INFINITY
 #define SLANG_INFINITY ((float)(1e+300 * 1e+300))
@@ -194,10 +190,82 @@ typedef size_t NonUniformResourceIndex;
 template<typename T, int ROWS, int COLS>
 struct Matrix;
 
-typedef int1 bool1;
-typedef int2 bool2;
-typedef int3 bool3;
-typedef int4 bool4;
+// Boolean vector types should follow CUDA's builtin vector alignment rules
+// Align boolX the same as charX according to CUDA spec:
+// char1/uchar1: 1-byte aligned, char2/uchar2: 2-byte aligned
+// char3/uchar3: 1-byte aligned, char4/uchar4: 4-byte aligned
+struct __align__(1) bool1
+{
+    bool x;
+
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
+    {
+        return (&x)[idx];
+    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
+    {
+        return (&x)[idx];
+    }
+};
+
+struct __align__(2) bool2
+{
+    bool x, y;
+
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
+    {
+        return (&x)[idx];
+    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
+    {
+        return (&x)[idx];
+    }
+};
+
+struct __align__(1) bool3
+{
+    bool x, y, z;
+
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
+    {
+        return (&x)[idx];
+    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
+    {
+        return (&x)[idx];
+    }
+};
+
+struct __align__(4) bool4
+{
+    bool x, y, z, w;
+
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
+    {
+        return (&x)[idx];
+    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
+    {
+        return (&x)[idx];
+    }
+};
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL bool __ldg(const bool* ptr)
+{
+    return (bool)(__ldg((const char*)ptr));
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL bool2 __ldg(const bool2* ptr)
+{
+    auto val = __ldg((const char2*)ptr);
+    return {val.x != 0, val.y != 0};
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL bool4 __ldg(const bool4* ptr)
+{
+    auto val = __ldg((const char4*)ptr);
+    return {val.x != 0, val.y != 0, val.z != 0, val.w != 0};
+}
 
 #if SLANG_CUDA_RTC
 
@@ -205,11 +273,13 @@ typedef signed char int8_t;
 typedef short int16_t;
 typedef int int32_t;
 typedef long long int64_t;
+typedef ptrdiff_t intptr_t;
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
+typedef size_t uintptr_t;
 
 #endif
 
@@ -284,6 +354,7 @@ struct __align__(4) __half4
         return ((T*)(&x))[index];                                                     \
     }
 SLANG_VECTOR_GET_ELEMENT(int)
+SLANG_VECTOR_GET_ELEMENT(bool)
 SLANG_VECTOR_GET_ELEMENT(uint)
 SLANG_VECTOR_GET_ELEMENT(short)
 SLANG_VECTOR_GET_ELEMENT(ushort)
@@ -294,24 +365,25 @@ SLANG_VECTOR_GET_ELEMENT(ulonglong)
 SLANG_VECTOR_GET_ELEMENT(float)
 SLANG_VECTOR_GET_ELEMENT(double)
 
-#define SLANG_VECTOR_GET_ELEMENT_PTR(T)                                                      \
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(T##1 * x, int index) \
-    {                                                                                        \
-        return ((T*)(x)) + index;                                                            \
-    }                                                                                        \
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(T##2 * x, int index) \
-    {                                                                                        \
-        return ((T*)(x)) + index;                                                            \
-    }                                                                                        \
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(T##3 * x, int index) \
-    {                                                                                        \
-        return ((T*)(x)) + index;                                                            \
-    }                                                                                        \
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(T##4 * x, int index) \
-    {                                                                                        \
-        return ((T*)(x)) + index;                                                            \
+#define SLANG_VECTOR_GET_ELEMENT_PTR(T)                                                            \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(const T##1 * x, int index) \
+    {                                                                                              \
+        return ((T*)(x)) + index;                                                                  \
+    }                                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(const T##2 * x, int index) \
+    {                                                                                              \
+        return ((T*)(x)) + index;                                                                  \
+    }                                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(const T##3 * x, int index) \
+    {                                                                                              \
+        return ((T*)(x)) + index;                                                                  \
+    }                                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T* _slang_vector_get_element_ptr(const T##4 * x, int index) \
+    {                                                                                              \
+        return ((T*)(x)) + index;                                                                  \
     }
 SLANG_VECTOR_GET_ELEMENT_PTR(int)
+SLANG_VECTOR_GET_ELEMENT_PTR(bool)
 SLANG_VECTOR_GET_ELEMENT_PTR(uint)
 SLANG_VECTOR_GET_ELEMENT_PTR(short)
 SLANG_VECTOR_GET_ELEMENT_PTR(ushort)
@@ -336,15 +408,14 @@ SLANG_VECTOR_GET_ELEMENT_PTR(__half)
                 _slang_vector_get_element(thisVal, i) op _slang_vector_get_element(other, i); \
         return result;                                                                        \
     }
-#define SLANG_CUDA_VECTOR_BINARY_COMPARE_OP(T, n, op)                                \
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool##n operator op(T##n thisVal, T##n other) \
-    {                                                                                \
-        bool##n result;                                                              \
-        for (int i = 0; i < n; i++)                                                  \
-            *_slang_vector_get_element_ptr(&result, i) =                             \
-                (int)(_slang_vector_get_element(thisVal, i)                          \
-                          op _slang_vector_get_element(other, i));                   \
-        return result;                                                               \
+#define SLANG_CUDA_VECTOR_BINARY_COMPARE_OP(T, n, op)                                           \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool##n operator op(T##n thisVal, T##n other)            \
+    {                                                                                           \
+        bool##n result;                                                                         \
+        for (int i = 0; i < n; i++)                                                             \
+            *_slang_vector_get_element_ptr(&result, i) =                                        \
+                (_slang_vector_get_element(thisVal, i) op _slang_vector_get_element(other, i)); \
+        return result;                                                                          \
     }
 #define SLANG_CUDA_VECTOR_UNARY_OP(T, n, op)                                                       \
     SLANG_FORCE_INLINE SLANG_CUDA_CALL T##n operator op(T##n thisVal)                              \
@@ -384,6 +455,7 @@ SLANG_VECTOR_GET_ELEMENT_PTR(__half)
     SLANG_CUDA_VECTOR_INT_OP(T, 4)
 
 SLANG_CUDA_VECTOR_INT_OPS(int)
+SLANG_CUDA_VECTOR_INT_OPS(bool)
 SLANG_CUDA_VECTOR_INT_OPS(uint)
 SLANG_CUDA_VECTOR_INT_OPS(ushort)
 SLANG_CUDA_VECTOR_INT_OPS(short)
@@ -596,6 +668,7 @@ struct GetVectorTypeImpl
     GET_VECTOR_TYPE_IMPL(T, 4)
 
 GET_VECTOR_TYPE_IMPL_N(int)
+GET_VECTOR_TYPE_IMPL_N(bool)
 GET_VECTOR_TYPE_IMPL_N(uint)
 GET_VECTOR_TYPE_IMPL_N(short)
 GET_VECTOR_TYPE_IMPL_N(ushort)
@@ -630,6 +703,11 @@ struct Matrix
 {
     Vector<T, COLS> rows[ROWS];
     SLANG_FORCE_INLINE SLANG_CUDA_CALL Vector<T, COLS>& operator[](size_t index)
+    {
+        return rows[index];
+    }
+
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const Vector<T, COLS>& operator[](size_t index) const
     {
         return rows[index];
     }
@@ -1041,6 +1119,7 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL Matrix<__half, R, C> operator%(
     SLANG_SELECT_IMPL(T, 4)
 
 SLANG_SELECT_T(int)
+SLANG_SELECT_T(bool)
 SLANG_SELECT_T(uint)
 SLANG_SELECT_T(short)
 SLANG_SELECT_T(ushort)
@@ -1261,190 +1340,241 @@ SLANG_SURFACE_READ_HALF_CONVERT(surf3Dread, (int x, int y, int z), (x, y, z))
 // For the _convert versions they are *not*. They don't need to be because sust.p does not require
 // it.
 
-template<typename T>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert(
-    T,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    cudaSurfaceBoundaryMode boundaryMode);
-template<typename T>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert(
-    T,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    cudaSurfaceBoundaryMode boundaryMode);
-template<typename T>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert(
-    T,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    int z,
-    cudaSurfaceBoundaryMode boundaryMode);
-
 // https://docs.nvidia.com/cuda/inline-ptx-assembly/index.html
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#surface-instructions-sust
 
-// Float
 
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<float>(
-    float v,
+// surf1Dwrite_convert
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert(
+    T v,
     cudaSurfaceObject_t surfObj,
     int x,
+    cudaSurfaceBoundaryMode boundaryMode);
+
+#define SLANG_SURF1DWRITE_CONVERT_IMPL(T, c)                                                     \
+    template<>                                                                                   \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<T>(                              \
+        T v,                                                                                     \
+        cudaSurfaceObject_t surfObj,                                                             \
+        int x,                                                                                   \
+        cudaSurfaceBoundaryMode boundaryMode)                                                    \
+    {                                                                                            \
+        asm volatile(                                                                            \
+            "sust.p.1d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1}], {%2};" ::"l"(surfObj),        \
+            "r"(x),                                                                              \
+            c(v));                                                                               \
+    }                                                                                            \
+    template<>                                                                                   \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<T##2>(                           \
+        T##2 v,                                                                                  \
+        cudaSurfaceObject_t surfObj,                                                             \
+        int x,                                                                                   \
+        cudaSurfaceBoundaryMode boundaryMode)                                                    \
+    {                                                                                            \
+        const T vx = v.x, vy = v.y;                                                              \
+        asm volatile(                                                                            \
+            "sust.p.1d.v2.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1}], {%2, %3};" ::"l"(surfObj), \
+            "r"(x),                                                                              \
+            c(vx),                                                                               \
+            c(vy));                                                                              \
+    }                                                                                            \
+    template<>                                                                                   \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<T##4>(                           \
+        T##4 v,                                                                                  \
+        cudaSurfaceObject_t surfObj,                                                             \
+        int x,                                                                                   \
+        cudaSurfaceBoundaryMode boundaryMode)                                                    \
+    {                                                                                            \
+        const T vx = v.x, vy = v.y, vz = v.z, vw = v.w;                                          \
+        asm volatile(                                                                            \
+            "sust.p.1d.v4.b32." SLANG_PTX_BOUNDARY_MODE                                          \
+            " [%0, {%1}], {%2, %3, %4, %5};" ::"l"(surfObj),                                     \
+            "r"(x),                                                                              \
+            c(vx),                                                                               \
+            c(vy),                                                                               \
+            c(vz),                                                                               \
+            c(vw));                                                                              \
+    }
+
+SLANG_SURF1DWRITE_CONVERT_IMPL(float, "f")
+SLANG_SURF1DWRITE_CONVERT_IMPL(uint, "r")
+SLANG_SURF1DWRITE_CONVERT_IMPL(int, "r")
+
+// surf1DLayeredwrite_convert (not supported)
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1DLayeredwrite_convert(
+    T v,
+    cudaSurfaceObject_t surfObj,
+    int x,
+    int layer,
     cudaSurfaceBoundaryMode boundaryMode)
 {
-    asm volatile(
-        "{sust.p.1d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1}], {%2};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "f"(v));
+    // TODO: static_assert(false) can fail on some compilers, even if template is not instantiated.
+    // We should check for this in hlsl.meta.slang instead.
+    // static_assert(false, "CUDA doesn't support formatted surface writes on 1D array surfaces");
 }
 
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<float>(
-    float v,
+// surf2Dwrite_convert
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert(
+    T v,
     cudaSurfaceObject_t surfObj,
     int x,
     int y,
+    cudaSurfaceBoundaryMode boundaryMode);
+
+#define SLANG_SURF2DWRITE_CONVERT_IMPL(T, c)                                                  \
+    template<>                                                                                \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<T>(                           \
+        T v,                                                                                  \
+        cudaSurfaceObject_t surfObj,                                                          \
+        int x,                                                                                \
+        int y,                                                                                \
+        cudaSurfaceBoundaryMode boundaryMode)                                                 \
+    {                                                                                         \
+        asm volatile(                                                                         \
+            "sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1, %2}], {%3};" ::"l"(surfObj), \
+            "r"(x),                                                                           \
+            "r"(y),                                                                           \
+            c(v));                                                                            \
+    }                                                                                         \
+    template<>                                                                                \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<T##2>(                        \
+        T##2 v,                                                                               \
+        cudaSurfaceObject_t surfObj,                                                          \
+        int x,                                                                                \
+        int y,                                                                                \
+        cudaSurfaceBoundaryMode boundaryMode)                                                 \
+    {                                                                                         \
+        const T vx = v.x, vy = v.y;                                                           \
+        asm volatile(                                                                         \
+            "sust.p.2d.v2.b32." SLANG_PTX_BOUNDARY_MODE                                       \
+            " [%0, {%1, %2}], {%3, %4};" ::"l"(surfObj),                                      \
+            "r"(x),                                                                           \
+            "r"(y),                                                                           \
+            c(vx),                                                                            \
+            c(vy));                                                                           \
+    }                                                                                         \
+    template<>                                                                                \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<T##4>(                        \
+        T##4 v,                                                                               \
+        cudaSurfaceObject_t surfObj,                                                          \
+        int x,                                                                                \
+        int y,                                                                                \
+        cudaSurfaceBoundaryMode boundaryMode)                                                 \
+    {                                                                                         \
+        const T vx = v.x, vy = v.y, vz = v.z, vw = v.w;                                       \
+        asm volatile(                                                                         \
+            "sust.p.2d.v4.b32." SLANG_PTX_BOUNDARY_MODE                                       \
+            " [%0, {%1, %2}], {%3, %4, %5, %6};" ::"l"(surfObj),                              \
+            "r"(x),                                                                           \
+            "r"(y),                                                                           \
+            c(vx),                                                                            \
+            c(vy),                                                                            \
+            c(vz),                                                                            \
+            c(vw));                                                                           \
+    }
+
+SLANG_SURF2DWRITE_CONVERT_IMPL(float, "f")
+SLANG_SURF2DWRITE_CONVERT_IMPL(uint, "r")
+SLANG_SURF2DWRITE_CONVERT_IMPL(int, "r")
+
+// surf2DLayeredwrite_convert (not supported)
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2DLayeredwrite_convert(
+    T v,
+    cudaSurfaceObject_t surfObj,
+    int x,
+    int y,
+    int layer,
     cudaSurfaceBoundaryMode boundaryMode)
 {
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1,%2}], {%3};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "f"(v));
+    // TODO: static_assert(false) can fail on some compilers, even if template is not instantiated.
+    // We should check for this in hlsl.meta.slang instead.
+    // static_assert(false, "CUDA doesn't support formatted surface writes on 2D array surfaces");
 }
 
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<float>(
-    float v,
+// surf3Dwrite_convert
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert(
+    T v,
     cudaSurfaceObject_t surfObj,
     int x,
     int y,
     int z,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1,%2,%3}], {%4};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "r"(z),
-        "f"(v));
-}
+    cudaSurfaceBoundaryMode boundaryMode);
 
-// Float2
+#define SLANG_SURF3DWRITE_CONVERT_IMPL(T, c)                             \
+    template<>                                                           \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<T>(      \
+        T v,                                                             \
+        cudaSurfaceObject_t surfObj,                                     \
+        int x,                                                           \
+        int y,                                                           \
+        int z,                                                           \
+        cudaSurfaceBoundaryMode boundaryMode)                            \
+    {                                                                    \
+        asm volatile(                                                    \
+            "sust.p.3d.b32." SLANG_PTX_BOUNDARY_MODE                     \
+            " [%0, {%1, %2, %3, %4}], {%5};" ::"l"(surfObj),             \
+            "r"(x),                                                      \
+            "r"(y),                                                      \
+            "r"(z),                                                      \
+            "r"(0),                                                      \
+            c(v));                                                       \
+    }                                                                    \
+    template<>                                                           \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<T##2>(   \
+        T##2 v,                                                          \
+        cudaSurfaceObject_t surfObj,                                     \
+        int x,                                                           \
+        int y,                                                           \
+        int z,                                                           \
+        cudaSurfaceBoundaryMode boundaryMode)                            \
+    {                                                                    \
+        const T vx = v.x, vy = v.y;                                      \
+        asm volatile(                                                    \
+            "sust.p.3d.v2.b32." SLANG_PTX_BOUNDARY_MODE                  \
+            " [%0, {%1, %2, %3, %4}], {%5, %6};" ::"l"(surfObj),         \
+            "r"(x),                                                      \
+            "r"(y),                                                      \
+            "r"(z),                                                      \
+            "r"(0),                                                      \
+            c(vx),                                                       \
+            c(vy));                                                      \
+    }                                                                    \
+    template<>                                                           \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<T##4>(   \
+        T##4 v,                                                          \
+        cudaSurfaceObject_t surfObj,                                     \
+        int x,                                                           \
+        int y,                                                           \
+        int z,                                                           \
+        cudaSurfaceBoundaryMode boundaryMode)                            \
+    {                                                                    \
+        const T vx = v.x, vy = v.y, vz = v.z, vw = v.w;                  \
+        asm volatile(                                                    \
+            "sust.p.3d.v4.b32." SLANG_PTX_BOUNDARY_MODE                  \
+            " [%0, {%1, %2, %3, %4}], {%5, %6, %7, %8};" ::"l"(surfObj), \
+            "r"(x),                                                      \
+            "r"(y),                                                      \
+            "r"(z),                                                      \
+            "r"(0),                                                      \
+            c(vx),                                                       \
+            c(vy),                                                       \
+            c(vz),                                                       \
+            c(vw));                                                      \
+    }
 
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<float2>(
-    float2 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y;
-    asm volatile(
-        "{sust.p.1d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1}], {%2,%3};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "f"(vx),
-        "f"(vy));
-}
-
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<float2>(
-    float2 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y;
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1,%2}], {%3,%4};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "f"(vx),
-        "f"(vy));
-}
-
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<float2>(
-    float2 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    int z,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y;
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1,%2,%3}], {%4,%5};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "r"(z),
-        "f"(vx),
-        "f"(vy));
-}
-
-// Float4
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf1Dwrite_convert<float4>(
-    float4 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y, vz = v.z, vw = v.w;
-    asm volatile(
-        "{sust.p.1d.b32." SLANG_PTX_BOUNDARY_MODE " [%0, {%1}], {%2,%3,%4,%5};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "f"(vx),
-        "f"(vy),
-        "f"(vz),
-        "f"(vw));
-}
-
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf2Dwrite_convert<float4>(
-    float4 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y, vz = v.z, vw = v.w;
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE
-        " [%0, {%1,%2}], {%3,%4,%5,%6};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "f"(vx),
-        "f"(vy),
-        "f"(vz),
-        "f"(vw));
-}
-
-template<>
-SLANG_FORCE_INLINE SLANG_CUDA_CALL void surf3Dwrite_convert<float4>(
-    float4 v,
-    cudaSurfaceObject_t surfObj,
-    int x,
-    int y,
-    int z,
-    cudaSurfaceBoundaryMode boundaryMode)
-{
-    const float vx = v.x, vy = v.y, vz = v.z, vw = v.w;
-    asm volatile(
-        "{sust.p.2d.b32." SLANG_PTX_BOUNDARY_MODE
-        " [%0, {%1,%2,%3}], {%4,%5,%6,%7};}\n\t" ::"l"(surfObj),
-        "r"(x),
-        "r"(y),
-        "r"(z),
-        "f"(vx),
-        "f"(vy),
-        "f"(vz),
-        "f"(vw));
-}
+SLANG_SURF3DWRITE_CONVERT_IMPL(float, "f")
+SLANG_SURF3DWRITE_CONVERT_IMPL(uint, "r")
+SLANG_SURF3DWRITE_CONVERT_IMPL(int, "r")
 
 // ----------------------------- F32 -----------------------------------------
 
@@ -1500,6 +1630,18 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_cosh(float f)
 SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_tanh(float f)
 {
     return ::tanhf(f);
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_asinh(float f)
+{
+    return ::asinhf(f);
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_acosh(float f)
+{
+    return ::acoshf(f);
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_atanh(float f)
+{
+    return ::atanhf(f);
 }
 SLANG_FORCE_INLINE SLANG_CUDA_CALL float F32_log2(float f)
 {
@@ -1786,39 +1928,34 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL double F64_fma(double a, double b, double c)
     return ::fma(a, b, c);
 }
 
-// ----------------------------- I32 -----------------------------------------
+// ----------------------------- U8 -----------------------------------------
 
-// Unary
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_abs(int32_t f)
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U8_countbits(uint8_t v)
 {
-    return (f < 0) ? -f : f;
-}
-
-// Binary
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_min(int32_t a, int32_t b)
-{
-    return a < b ? a : b;
-}
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_max(int32_t a, int32_t b)
-{
-    return a > b ? a : b;
+    // No native 8bit popc yet, just cast and use 32bit variant
+    return __popc(uint32_t(v));
 }
 
-SLANG_FORCE_INLINE SLANG_CUDA_CALL float I32_asfloat(int32_t x)
+// ----------------------------- I8 -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I8_countbits(int8_t v)
 {
-    Union32 u;
-    u.i = x;
-    return u.f;
+    return U8_countbits(uint8_t(v));
 }
-SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I32_asuint(int32_t x)
+
+// ----------------------------- U16 -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U16_countbits(uint16_t v)
 {
-    return uint32_t(x);
+    // No native 16bit popc yet, just cast and use 32bit variant
+    return __popc(uint32_t(v));
 }
-SLANG_FORCE_INLINE SLANG_CUDA_CALL double I32_asdouble(int32_t low, int32_t hi)
+
+// ----------------------------- I16 -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I16_countbits(int16_t v)
 {
-    Union64 u;
-    u.u = (uint64_t(hi) << 32) | uint32_t(low);
-    return u.d;
+    return U16_countbits(uint16_t(v));
 }
 
 // ----------------------------- U32 -----------------------------------------
@@ -1859,25 +1996,74 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL double U32_asdouble(uint32_t low, uint32_t hi
 
 SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U32_countbits(uint32_t v)
 {
-    // https://docs.nvidia.com/cuda/cuda-math-api/group__CUDA__MATH__INTRINSIC__INT.html#group__CUDA__MATH__INTRINSIC__INT_1g43c9c7d2b9ebf202ff1ef5769989be46
     return __popc(v);
 }
 
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U32_firstbitlow(uint32_t v)
+{
+    // __ffs returns 1-based bit position or 0 if no bits set
+    // firstbitlow should return 0-based bit position or ~0u if no bits set
+    return v == 0 ? ~0u : (__ffs(v) - 1);
+}
 
-// ----------------------------- I64 -----------------------------------------
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U32_firstbithigh(uint32_t v)
+{
+    // maps to hlsl firstbithigh
+    if ((int32_t)v < 0)
+        v = ~v;
+    if (v == 0)
+        return ~0u;
+    return 31 - __clz(v);
+}
 
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_abs(int64_t f)
+// ----------------------------- I32 -----------------------------------------
+
+// Unary
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_abs(int32_t f)
 {
     return (f < 0) ? -f : f;
 }
 
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_min(int64_t a, int64_t b)
+// Binary
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_min(int32_t a, int32_t b)
 {
     return a < b ? a : b;
 }
-SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_max(int64_t a, int64_t b)
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int32_t I32_max(int32_t a, int32_t b)
 {
     return a > b ? a : b;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL float I32_asfloat(int32_t x)
+{
+    Union32 u;
+    u.i = x;
+    return u.f;
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I32_asuint(int32_t x)
+{
+    return uint32_t(x);
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL double I32_asdouble(int32_t low, int32_t hi)
+{
+    Union64 u;
+    u.u = (uint64_t(hi) << 32) | uint32_t(low);
+    return u.d;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I32_countbits(int32_t v)
+{
+    return U32_countbits(uint32_t(v));
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I32_firstbitlow(int32_t v)
+{
+    return U32_firstbitlow(uint32_t(v));
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I32_firstbithigh(int32_t v)
+{
+    return U32_firstbithigh(uint32_t(v));
 }
 
 // ----------------------------- U64 -----------------------------------------
@@ -1898,10 +2084,63 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t U64_max(uint64_t a, uint64_t b)
 
 SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U64_countbits(uint64_t v)
 {
-    // https://docs.nvidia.com/cuda/cuda-math-api/group__CUDA__MATH__INTRINSIC__INT.html#group__CUDA__MATH__INTRINSIC__INT_1g43c9c7d2b9ebf202ff1ef5769989be46
     return __popcll(v);
 }
 
+// ----------------------------- I64 -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_abs(int64_t f)
+{
+    return (f < 0) ? -f : f;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_min(int64_t a, int64_t b)
+{
+    return a < b ? a : b;
+}
+SLANG_FORCE_INLINE SLANG_CUDA_CALL int64_t I64_max(int64_t a, int64_t b)
+{
+    return a > b ? a : b;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t I64_countbits(int64_t v)
+{
+    return U64_countbits(uint64_t(v));
+}
+
+// ----------------------------- IPTR -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL intptr_t IPTR_abs(intptr_t f)
+{
+    return (f < 0) ? -f : f;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL intptr_t IPTR_min(intptr_t a, intptr_t b)
+{
+    return a < b ? a : b;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL intptr_t IPTR_max(intptr_t a, intptr_t b)
+{
+    return a > b ? a : b;
+}
+
+// ----------------------------- UPTR -----------------------------------------
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uintptr_t UPTR_abs(uintptr_t f)
+{
+    return f;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uintptr_t UPTR_min(uintptr_t a, uintptr_t b)
+{
+    return a < b ? a : b;
+}
+
+SLANG_FORCE_INLINE SLANG_CUDA_CALL uintptr_t UPTR_max(uintptr_t a, uintptr_t b)
+{
+    return a > b ? a : b;
+}
 
 // ----------------------------- ResourceType -----------------------------------------
 
@@ -1912,7 +2151,7 @@ SLANG_FORCE_INLINE SLANG_CUDA_CALL uint32_t U64_countbits(uint64_t v)
 template<typename T>
 struct StructuredBuffer
 {
-    SLANG_CUDA_CALL const T& operator[](size_t index) const
+    SLANG_CUDA_CALL T& operator[](size_t index) const
     {
 #ifndef SLANG_CUDA_STRUCTURED_BUFFER_NO_COUNT
         SLANG_BOUND_CHECK(index, count);
@@ -1920,7 +2159,7 @@ struct StructuredBuffer
         return data[index];
     }
 
-    SLANG_CUDA_CALL const T& Load(size_t index) const
+    SLANG_CUDA_CALL T& Load(size_t index) const
     {
 #ifndef SLANG_CUDA_STRUCTURED_BUFFER_NO_COUNT
         SLANG_BOUND_CHECK(index, count);
@@ -1929,7 +2168,7 @@ struct StructuredBuffer
     }
 
 #ifndef SLANG_CUDA_STRUCTURED_BUFFER_NO_COUNT
-    SLANG_CUDA_CALL void GetDimensions(uint32_t* outNumStructs, uint32_t* outStride)
+    SLANG_CUDA_CALL void GetDimensions(uint32_t* outNumStructs, uint32_t* outStride) const
     {
         *outNumStructs = uint32_t(count);
         *outStride = uint32_t(sizeof(T));
@@ -2002,7 +2241,32 @@ struct ByteAddressBuffer
 };
 
 // https://docs.microsoft.com/en-us/windows/win32/direct3dhlsl/sm5-object-rwbyteaddressbuffer
-// Missing support for Atomic operations
+// Atomic operations support
+
+// Signed 64-bit atomic wrappers
+// CUDA only supports unsigned long long atomics, so we cast signed to unsigned
+__device__ __forceinline__ long long atomicExch(long long* address, long long val)
+{
+    return (long long)atomicExch((unsigned long long*)address, (unsigned long long)val);
+}
+
+__device__ __forceinline__ long long atomicCAS(long long* address, long long compare, long long val)
+{
+    return (long long)atomicCAS(
+        (unsigned long long*)address,
+        (unsigned long long)compare,
+        (unsigned long long)val);
+}
+
+// Float bitwise atomic compare-and-swap
+// Uses integer atomics to preserve exact float bit patterns
+__device__ __forceinline__ float atomicCAS(float* address, float compare, float val)
+{
+    int* addr_as_int = (int*)address;
+    int old = atomicCAS(addr_as_int, __float_as_int(compare), __float_as_int(val));
+    return __int_as_float(old);
+}
+
 // Missing support for Load with status
 struct RWByteAddressBuffer
 {
@@ -2261,16 +2525,66 @@ struct WaveOpMul
 template<typename T>
 struct WaveOpMax
 {
-    __inline__ __device__ static T getInitial(T a) { return a; }
+    __inline__ __device__ static T getInitial(T a, bool exclusive = false);
     __inline__ __device__ static T doOp(T a, T b) { return a > b ? a : b; }
 };
 
 template<typename T>
 struct WaveOpMin
 {
-    __inline__ __device__ static T getInitial(T a) { return a; }
+    __inline__ __device__ static T getInitial(T a, bool exclusive = false);
     __inline__ __device__ static T doOp(T a, T b) { return a < b ? a : b; }
 };
+
+// Compact specializations using macro for getInitial
+#define SLANG_WAVE_MIN_SPEC(T, EXCL_VAL)                                  \
+    template<>                                                            \
+    __inline__ __device__ T WaveOpMin<T>::getInitial(T a, bool exclusive) \
+    {                                                                     \
+        return exclusive ? (EXCL_VAL) : a;                                \
+    }
+
+#define SLANG_WAVE_MAX_SPEC(T, EXCL_VAL)                                  \
+    template<>                                                            \
+    __inline__ __device__ T WaveOpMax<T>::getInitial(T a, bool exclusive) \
+    {                                                                     \
+        return exclusive ? (EXCL_VAL) : a;                                \
+    }
+
+// Min specializations (exclusive identity = max value)
+SLANG_WAVE_MIN_SPEC(float, SLANG_INFINITY)
+SLANG_WAVE_MIN_SPEC(double, SLANG_INFINITY)
+SLANG_WAVE_MIN_SPEC(int, 0x7FFFFFFF)
+SLANG_WAVE_MIN_SPEC(uint, 0xFFFFFFFF)
+SLANG_WAVE_MIN_SPEC(char, (char)0x7F)
+SLANG_WAVE_MIN_SPEC(int8_t, (int8_t)0x7F)
+SLANG_WAVE_MIN_SPEC(uint8_t, (uint8_t)0xFF)
+SLANG_WAVE_MIN_SPEC(int16_t, (int16_t)0x7FFF)
+SLANG_WAVE_MIN_SPEC(uint16_t, (uint16_t)0xFFFF)
+SLANG_WAVE_MIN_SPEC(int64_t, 0x7FFFFFFFFFFFFFFFLL)
+SLANG_WAVE_MIN_SPEC(uint64_t, 0xFFFFFFFFFFFFFFFFULL)
+#if SLANG_CUDA_ENABLE_HALF
+SLANG_WAVE_MIN_SPEC(__half, __ushort_as_half(0x7BFF))
+#endif
+
+// Max specializations (exclusive identity = min value)
+SLANG_WAVE_MAX_SPEC(float, -SLANG_INFINITY)
+SLANG_WAVE_MAX_SPEC(double, -SLANG_INFINITY)
+SLANG_WAVE_MAX_SPEC(int, (int)0x80000000)
+SLANG_WAVE_MAX_SPEC(uint, 0)
+SLANG_WAVE_MAX_SPEC(char, (char)0x80)
+SLANG_WAVE_MAX_SPEC(int8_t, (int8_t)0x80)
+SLANG_WAVE_MAX_SPEC(uint8_t, 0)
+SLANG_WAVE_MAX_SPEC(int16_t, (int16_t)0x8000)
+SLANG_WAVE_MAX_SPEC(uint16_t, 0)
+SLANG_WAVE_MAX_SPEC(int64_t, (int64_t)0x8000000000000000LL)
+SLANG_WAVE_MAX_SPEC(uint64_t, 0)
+#if SLANG_CUDA_ENABLE_HALF
+SLANG_WAVE_MAX_SPEC(__half, __ushort_as_half(0xFBFF))
+#endif
+
+#undef SLANG_WAVE_MIN_SPEC
+#undef SLANG_WAVE_MAX_SPEC
 
 template<typename T>
 struct ElementTypeTrait;
@@ -2306,6 +2620,33 @@ struct ElementTypeTrait<int64_t>
 {
     typedef int64_t Type;
 };
+template<>
+struct ElementTypeTrait<char>
+{
+    typedef char Type;
+};
+template<>
+struct ElementTypeTrait<uchar>
+{
+    typedef uchar Type;
+};
+template<>
+struct ElementTypeTrait<short>
+{
+    typedef short Type;
+};
+template<>
+struct ElementTypeTrait<ushort>
+{
+    typedef ushort Type;
+};
+#if SLANG_CUDA_ENABLE_HALF
+template<>
+struct ElementTypeTrait<__half>
+{
+    typedef __half Type;
+};
+#endif
 
 // Vector
 template<>
@@ -2391,6 +2732,115 @@ struct ElementTypeTrait<double4>
 {
     typedef double Type;
 };
+
+// Additional vector types
+template<>
+struct ElementTypeTrait<char2>
+{
+    typedef char Type;
+};
+template<>
+struct ElementTypeTrait<char3>
+{
+    typedef char Type;
+};
+template<>
+struct ElementTypeTrait<char4>
+{
+    typedef char Type;
+};
+template<>
+struct ElementTypeTrait<uchar2>
+{
+    typedef uchar Type;
+};
+template<>
+struct ElementTypeTrait<uchar3>
+{
+    typedef uchar Type;
+};
+template<>
+struct ElementTypeTrait<uchar4>
+{
+    typedef uchar Type;
+};
+template<>
+struct ElementTypeTrait<short2>
+{
+    typedef short Type;
+};
+template<>
+struct ElementTypeTrait<short3>
+{
+    typedef short Type;
+};
+template<>
+struct ElementTypeTrait<short4>
+{
+    typedef short Type;
+};
+template<>
+struct ElementTypeTrait<ushort2>
+{
+    typedef ushort Type;
+};
+template<>
+struct ElementTypeTrait<ushort3>
+{
+    typedef ushort Type;
+};
+template<>
+struct ElementTypeTrait<ushort4>
+{
+    typedef ushort Type;
+};
+template<>
+struct ElementTypeTrait<longlong2>
+{
+    typedef int64_t Type;
+};
+template<>
+struct ElementTypeTrait<longlong3>
+{
+    typedef int64_t Type;
+};
+template<>
+struct ElementTypeTrait<longlong4>
+{
+    typedef int64_t Type;
+};
+template<>
+struct ElementTypeTrait<ulonglong2>
+{
+    typedef uint64_t Type;
+};
+template<>
+struct ElementTypeTrait<ulonglong3>
+{
+    typedef uint64_t Type;
+};
+template<>
+struct ElementTypeTrait<ulonglong4>
+{
+    typedef uint64_t Type;
+};
+#if SLANG_CUDA_ENABLE_HALF
+template<>
+struct ElementTypeTrait<__half2>
+{
+    typedef __half Type;
+};
+template<>
+struct ElementTypeTrait<__half3>
+{
+    typedef __half Type;
+};
+template<>
+struct ElementTypeTrait<__half4>
+{
+    typedef __half Type;
+};
+#endif
 
 // Matrix
 template<typename T, int ROWS, int COLS>
@@ -3031,6 +3481,111 @@ __inline__ __device__ T _wavePrefixAndMultiple(WarpMask mask, T val)
 }
 
 template<typename T>
+__inline__ __device__ T _wavePrefixMin(WarpMask mask, T val)
+{
+    return _wavePrefixScalar<WaveOpMin<T>, T>(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixMax(WarpMask mask, T val)
+{
+    return _wavePrefixScalar<WaveOpMax<T>, T>(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixMinMultiple(WarpMask mask, T val)
+{
+    typedef typename ElementTypeTrait<T>::Type ElemType;
+    _wavePrefixMultiple<WaveOpMin<ElemType>, ElemType, sizeof(T) / sizeof(ElemType)>(
+        mask,
+        (ElemType*)&val);
+    return val;
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixMaxMultiple(WarpMask mask, T val)
+{
+    typedef typename ElementTypeTrait<T>::Type ElemType;
+    _wavePrefixMultiple<WaveOpMax<ElemType>, ElemType, sizeof(T) / sizeof(ElemType)>(
+        mask,
+        (ElemType*)&val);
+    return val;
+}
+
+// Wrapper structures for exclusive operations that use the overloaded getInitial method
+template<typename T>
+struct WaveOpExclusiveMin
+{
+    __inline__ __device__ static T getInitial(T a) { return WaveOpMin<T>::getInitial(a, true); }
+    __inline__ __device__ static T doOp(T a, T b) { return WaveOpMin<T>::doOp(a, b); }
+};
+
+template<typename T>
+struct WaveOpExclusiveMax
+{
+    __inline__ __device__ static T getInitial(T a) { return WaveOpMax<T>::getInitial(a, true); }
+    __inline__ __device__ static T doOp(T a, T b) { return WaveOpMax<T>::doOp(a, b); }
+};
+
+// Inclusive prefix min/max functions (for WaveMultiPrefixInclusive*)
+template<typename T>
+__inline__ __device__ T _wavePrefixInclusiveMin(WarpMask mask, T val)
+{
+    return _wavePrefixMin(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixInclusiveMax(WarpMask mask, T val)
+{
+    return _wavePrefixMax(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixInclusiveMinMultiple(WarpMask mask, T val)
+{
+    return _wavePrefixMinMultiple(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixInclusiveMaxMultiple(WarpMask mask, T val)
+{
+    return _wavePrefixMaxMultiple(mask, val);
+}
+
+// Explicit exclusive prefix min/max functions (for WaveMultiPrefixExclusive*)
+template<typename T>
+__inline__ __device__ T _wavePrefixExclusiveMin(WarpMask mask, T val)
+{
+    return _wavePrefixScalar<WaveOpExclusiveMin<T>, T>(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixExclusiveMax(WarpMask mask, T val)
+{
+    return _wavePrefixScalar<WaveOpExclusiveMax<T>, T>(mask, val);
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixExclusiveMinMultiple(WarpMask mask, T val)
+{
+    typedef typename ElementTypeTrait<T>::Type ElemType;
+    _wavePrefixMultiple<WaveOpExclusiveMin<ElemType>, ElemType, sizeof(T) / sizeof(ElemType)>(
+        mask,
+        (ElemType*)&val);
+    return val;
+}
+
+template<typename T>
+__inline__ __device__ T _wavePrefixExclusiveMaxMultiple(WarpMask mask, T val)
+{
+    typedef typename ElementTypeTrait<T>::Type ElemType;
+    _wavePrefixMultiple<WaveOpExclusiveMax<ElemType>, ElemType, sizeof(T) / sizeof(ElemType)>(
+        mask,
+        (ElemType*)&val);
+    return val;
+}
+
+template<typename T>
 __inline__ __device__ uint4 _waveMatchScalar(WarpMask mask, T val)
 {
     int pred;
@@ -3084,6 +3639,7 @@ struct UniformState;
 
 // ---------------------- OptiX Ray Payload --------------------------------------
 #ifdef SLANG_CUDA_ENABLE_OPTIX
+
 struct RayDesc
 {
     float3 Origin;
@@ -3117,7 +3673,7 @@ static __forceinline__ __device__ void* getOptiXRayPayloadPtr()
 }
 
 template<typename T>
-__forceinline__ __device__ void* traceOptiXRay(
+__forceinline__ __device__ void* optixTrace(
     OptixTraversableHandle AccelerationStructure,
     uint32_t RayFlags,
     uint32_t InstanceInclusionMask,
@@ -3145,8 +3701,572 @@ __forceinline__ __device__ void* traceOptiXRay(
         r1);
 }
 
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ float4 optixGetSpherePositionAndRadius()
+{
+    float4 data[1];
+    optixGetSphereData(data);
+    return data[0];
+}
 #endif
 
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ float4
+optixHitObjectGetSpherePositionAndRadius(OptixTraversableHandle* Obj)
+{
+    float4 data[1];
+    optixHitObjectGetSphereData(data);
+    return data[0];
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ Matrix<float, 2, 4> optixGetLssPositionsAndRadii()
+{
+    float4 data[2];
+    optixGetLinearCurveVertexData(data);
+    return makeMatrix<float, 2, 4>(data[0], data[1]);
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ Matrix<float, 2, 4> optixHitObjectGetLssPositionsAndRadii(
+    OptixTraversableHandle* Obj)
+{
+    float4 data[2];
+    optixHitObjectGetLinearCurveVertexData(data);
+    return makeMatrix<float, 2, 4>(data[0], data[1]);
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ bool optixIsSphereHit()
+{
+    return optixGetPrimitiveType() == OPTIX_PRIMITIVE_TYPE_SPHERE;
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ bool optixHitObjectIsSphereHit(OptixTraversableHandle* Obj)
+{
+    return optixGetPrimitiveType(optixHitObjectGetHitKind()) == OPTIX_PRIMITIVE_TYPE_SPHERE;
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ bool optixIsLSSHit()
+{
+    return optixGetPrimitiveType() == OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR;
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+__forceinline__ __device__ bool optixHitObjectIsLSSHit(OptixTraversableHandle* Obj)
+{
+    return optixGetPrimitiveType(optixHitObjectGetHitKind()) == OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR;
+}
+#endif
+
+template<typename T>
+__forceinline__ __device__ void* optixTraverse(
+    OptixTraversableHandle AccelerationStructure,
+    uint32_t RayFlags,
+    uint32_t InstanceInclusionMask,
+    uint32_t RayContributionToHitGroupIndex,
+    uint32_t MultiplierForGeometryContributionToHitGroupIndex,
+    uint32_t MissShaderIndex,
+    RayDesc Ray,
+    T* Payload,
+    OptixTraversableHandle* hitObj)
+{
+    uint32_t r0, r1;
+    packOptiXRayPayloadPointer((void*)Payload, r0, r1);
+    optixTraverse(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        Ray.TMax,
+        0.f, /* Time for motion blur, currently unsupported in slang */
+        InstanceInclusionMask,
+        RayFlags,
+        RayContributionToHitGroupIndex,
+        MultiplierForGeometryContributionToHitGroupIndex,
+        MissShaderIndex,
+        r0,
+        r1);
+}
+
+template<typename T>
+__forceinline__ __device__ void* optixTraverse(
+    OptixTraversableHandle AccelerationStructure,
+    uint32_t RayFlags,
+    uint32_t InstanceInclusionMask,
+    uint32_t RayContributionToHitGroupIndex,
+    uint32_t MultiplierForGeometryContributionToHitGroupIndex,
+    uint32_t MissShaderIndex,
+    RayDesc Ray,
+    float RayTime,
+    T* Payload,
+    OptixTraversableHandle* hitObj)
+{
+    uint32_t r0, r1;
+    packOptiXRayPayloadPointer((void*)Payload, r0, r1);
+    optixTraverse(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        Ray.TMax,
+        RayTime,
+        InstanceInclusionMask,
+        RayFlags,
+        RayContributionToHitGroupIndex,
+        MultiplierForGeometryContributionToHitGroupIndex,
+        MissShaderIndex,
+        r0,
+        r1);
+}
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ bool slangOptixHitObjectIsHit(OptixTraversableHandle* hitObj)
+{
+    return optixHitObjectIsHit();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ bool slangOptixHitObjectIsMiss(OptixTraversableHandle* hitObj)
+{
+    return optixHitObjectIsMiss();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ bool slangOptixHitObjectIsNop(OptixTraversableHandle* hitObj)
+{
+    return optixHitObjectIsNop();
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+static __forceinline__ __device__ uint
+slangOptixHitObjectGetClusterId(OptixTraversableHandle* hitObj)
+{
+    return optixHitObjectGetClusterId();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ void optixMakeMissHitObject(
+    uint MissShaderIndex,
+    RayDesc Ray,
+    OptixTraversableHandle* missObj)
+{
+    optixMakeMissHitObject(
+        MissShaderIndex,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        Ray.TMax,
+        0.f /* rayTime */
+#if (OPTIX_VERSION >= 90000)
+        ,
+        OPTIX_RAY_FLAG_NONE /* rayFlags*/
+#endif
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ void optixMakeMissHitObject(
+    uint MissShaderIndex,
+    RayDesc Ray,
+    float CurrentTime,
+    OptixTraversableHandle* missObj)
+{
+    optixMakeMissHitObject(
+        MissShaderIndex,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        Ray.TMax,
+        CurrentTime
+#if (OPTIX_VERSION >= 90000)
+        ,
+        OPTIX_RAY_FLAG_NONE /* rayFlags*/
+#endif
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    uint RayContributionToHitGroupIndex,
+    uint MultiplierForGeometryContributionToHitGroupIndex,
+    RayDesc Ray,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    OptixTraverseData data{};
+    optixHitObjectGetTraverseData(&data);
+    optixMakeHitObject(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        0.f,
+        OPTIX_RAY_FLAG_NONE, /* rayFlags*/
+        data,
+        nullptr, /*OptixTraversableHandle* transforms*/
+        0 /*numTransforms */);
+}
+#elif (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    uint RayContributionToHitGroupIndex,
+    uint MultiplierForGeometryContributionToHitGroupIndex,
+    RayDesc Ray,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    // OptiX 8.1 version: call native optixMakeHitObject directly
+    optixMakeHitObject(
+        AccelerationStructure,                            // handle
+        Ray.Origin,                                       // rayOrigin
+        Ray.Direction,                                    // rayDirection
+        Ray.TMin,                                         // tmin
+        Ray.TMax,                                         // tmax
+        0.f,                                              // rayTime
+        RayContributionToHitGroupIndex,                   // sbtOffset
+        MultiplierForGeometryContributionToHitGroupIndex, // sbtStride
+        InstanceIndex,                                    // instIdx
+        nullptr,                                          // transforms
+        0,                                                // numTransforms
+        GeometryIndex,                                    // sbtGASIdx
+        PrimitiveIndex,                                   // primIdx
+        HitKind                                           // hitKind
+        /* no attributes passed - empty variadic pack */
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    uint HitGroupRecordIndex,
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    RayDesc Ray,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    OptixTraverseData data{};
+    optixHitObjectGetTraverseData(&data);
+    optixMakeHitObject(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        0.f,
+        OPTIX_RAY_FLAG_NONE, /* rayFlags*/
+        data,
+        nullptr, /*OptixTraversableHandle* transforms*/
+        0 /*numTransforms */);
+}
+#elif (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    uint HitGroupRecordIndex,
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    RayDesc Ray,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    // OptiX 8.1 version: call optixMakeHitObjectWithRecord directly
+    optixMakeHitObjectWithRecord(
+        AccelerationStructure, // handle
+        Ray.Origin,            // rayOrigin
+        Ray.Direction,         // rayDirection
+        Ray.TMin,              // tmin
+        Ray.TMax,              // tmax
+        0.f,                   // rayTime
+        HitGroupRecordIndex,   // sbtRecordIndex
+        InstanceIndex,         // instIdx
+        nullptr,               // transforms
+        0,                     // numTransforms
+        GeometryIndex,         // sbtGASIdx
+        PrimitiveIndex,        // primIdx
+        HitKind                // hitKind
+        /* no attributes passed - empty variadic pack */
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    uint RayContributionToHitGroupIndex,
+    uint MultiplierForGeometryContributionToHitGroupIndex,
+    RayDesc Ray,
+    float CurrentTime,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    OptixTraverseData data{};
+    optixHitObjectGetTraverseData(&data);
+    optixMakeHitObject(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        CurrentTime,
+        OPTIX_RAY_FLAG_NONE, /* rayFlags*/
+        data,
+        nullptr, /*OptixTraversableHandle* transforms*/
+        0 /*numTransforms */);
+}
+#elif (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    uint RayContributionToHitGroupIndex,
+    uint MultiplierForGeometryContributionToHitGroupIndex,
+    RayDesc Ray,
+    float CurrentTime,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    // OptiX 8.1 version: call native optixMakeHitObject directly
+    optixMakeHitObject(
+        AccelerationStructure,                            // handle
+        Ray.Origin,                                       // rayOrigin
+        Ray.Direction,                                    // rayDirection
+        Ray.TMin,                                         // tmin
+        Ray.TMax,                                         // tmax
+        CurrentTime,                                      // rayTime
+        RayContributionToHitGroupIndex,                   // sbtOffset
+        MultiplierForGeometryContributionToHitGroupIndex, // sbtStride
+        InstanceIndex,                                    // instIdx
+        nullptr,                                          // transforms
+        0,                                                // numTransforms
+        GeometryIndex,                                    // sbtGASIdx
+        PrimitiveIndex,                                   // primIdx
+        HitKind                                           // hitKind
+        /* no attributes passed - empty variadic pack */
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    uint HitGroupRecordIndex,
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    RayDesc Ray,
+    float CurrentTime,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    OptixTraverseData data{};
+    optixHitObjectGetTraverseData(&data);
+    optixMakeHitObject(
+        AccelerationStructure,
+        Ray.Origin,
+        Ray.Direction,
+        Ray.TMin,
+        CurrentTime,
+        OPTIX_RAY_FLAG_NONE, /* rayFlags*/
+        data,
+        nullptr, /*OptixTraversableHandle* transforms*/
+        0 /*numTransforms */);
+}
+#elif (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ void optixMakeHitObject(
+    uint HitGroupRecordIndex,
+    OptixTraversableHandle AccelerationStructure,
+    uint InstanceIndex,
+    uint GeometryIndex,
+    uint PrimitiveIndex,
+    uint HitKind,
+    RayDesc Ray,
+    float CurrentTime,
+    T attr,
+    OptixTraversableHandle* handle)
+{
+    // OptiX 8.1 version: call optixMakeHitObjectWithRecord directly
+    optixMakeHitObjectWithRecord(
+        AccelerationStructure, // handle
+        Ray.Origin,            // rayOrigin
+        Ray.Direction,         // rayDirection
+        Ray.TMin,              // tmin
+        Ray.TMax,              // tmax
+        CurrentTime,           // rayTime
+        HitGroupRecordIndex,   // sbtRecordIndex
+        InstanceIndex,         // instIdx
+        nullptr,               // transforms
+        0,                     // numTransforms
+        GeometryIndex,         // sbtGASIdx
+        PrimitiveIndex,        // primIdx
+        HitKind                // hitKind
+        /* no attributes passed - empty variadic pack */
+    );
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ void slangOptixMakeNopHitObject(OptixTraversableHandle* Obj)
+{
+    optixMakeNopHitObject();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ void optixInvoke(
+    OptixTraversableHandle AccelerationStructure,
+    OptixTraversableHandle* HitOrMiss,
+    T Payload)
+{
+    uint32_t r0, r1;
+    packOptiXRayPayloadPointer((void*)Payload, r0, r1);
+    optixInvoke(r0, r1);
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ RayDesc optixHitObjectGetRayDesc(OptixTraversableHandle* obj)
+{
+    RayDesc ray = {
+        optixHitObjectGetWorldRayOrigin(),
+        optixHitObjectGetRayTmin(),
+        optixHitObjectGetWorldRayDirection(),
+        optixHitObjectGetRayTmax()};
+    return ray;
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ uint
+slangOptixHitObjectGetInstanceIndex(OptixTraversableHandle* Obj)
+{
+    return optixHitObjectGetInstanceIndex();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ uint slangOptixHitObjectGetInstanceId(OptixTraversableHandle* Obj)
+{
+    return optixHitObjectGetInstanceId();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ uint
+slangOptixHitObjectGetSbtGASIndex(OptixTraversableHandle* Obj)
+{
+    return optixHitObjectGetSbtGASIndex();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ uint
+slangOptixHitObjectGetPrimitiveIndex(OptixTraversableHandle* Obj)
+{
+    return optixHitObjectGetPrimitiveIndex();
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+template<typename T>
+static __forceinline__ __device__ T optixHitObjectGetAttribute(OptixTraversableHandle* Obj)
+{
+    constexpr size_t numInts = (sizeof(T) + sizeof(uint32_t) - 1) /
+                               sizeof(uint32_t); // Number of 32-bit values, rounded up
+    static_assert(numInts <= 8, "Attribute type is too large");
+
+    // Create an array to hold the attribute values
+    uint32_t values[numInts == 0 ? 1 : numInts] = {0}; // Ensure we have at least one element
+
+    // Read the appropriate number of attribute registers
+    if constexpr (numInts > 0)
+        values[0] = optixHitObjectGetAttribute_0();
+    if constexpr (numInts > 1)
+        values[1] = optixHitObjectGetAttribute_1();
+    if constexpr (numInts > 2)
+        values[2] = optixHitObjectGetAttribute_2();
+    if constexpr (numInts > 3)
+        values[3] = optixHitObjectGetAttribute_3();
+    if constexpr (numInts > 4)
+        values[4] = optixHitObjectGetAttribute_4();
+    if constexpr (numInts > 5)
+        values[5] = optixHitObjectGetAttribute_5();
+    if constexpr (numInts > 6)
+        values[6] = optixHitObjectGetAttribute_6();
+    if constexpr (numInts > 7)
+        values[7] = optixHitObjectGetAttribute_7();
+
+    // Reinterpret the array as the desired type
+    T result;
+    memcpy(&result, values, sizeof(T));
+    return result;
+}
+#endif
+
+#if (OPTIX_VERSION >= 80100)
+static __forceinline__ __device__ uint
+slangOptixHitObjectGetSbtRecordIndex(OptixTraversableHandle* Obj)
+{
+    return optixHitObjectGetSbtRecordIndex();
+}
+#endif
+
+#if (OPTIX_VERSION >= 90000)
+static __forceinline__ __device__ uint
+slangOptixHitObjectSetSbtRecordIndex(OptixTraversableHandle* Obj, uint sbtRecordIndex)
+{
+    optixHitObjectSetSbtRecordIndex(sbtRecordIndex); // returns void
+    return sbtRecordIndex;
+}
+#endif
+
+#else
+// Define OptixTraversableHandle even if OptiX is not enabled.
+// This allows RaytracingAccelerationStructure to be properly reflected in non-OptiX code.
+typedef unsigned long long OptixTraversableHandle;
+#endif
 static const int kSlangTorchTensorMaxDim = 5;
 
 // TensorView
@@ -3321,3 +4441,615 @@ struct TensorView
         *reinterpret_cast<T*>(data + offset) = val;
     }
 };
+
+// Implementations for texture fetch/load functions using tex PTX intrinsics
+// These are used for read-only texture access with integer coordinates.
+
+// 1D is not supported via PTX. Keeping the implementation below in case it ever gets supported.
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL T tex1Dfetch_int(CUtexObject texObj, int x, int mip)
+{
+    // TODO: static_assert(false) can fail on some compilers, even if template is not instantiated.
+    // We should check for this in hlsl.meta.slang instead.
+    // static_assert(false, "CUDA does not support fetching from 1D textures");
+}
+
+#if 0
+#define SLANG_TEX1DFETCH_INT_IMPL(T, dtype, c)                                                 \
+    template<>                                                                                 \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T tex1Dfetch_int(CUtexObject texObj, int x, int mip)    \
+    {                                                                                          \
+        T result;                                                                              \
+        T stub;                                                                                \
+        asm("tex.level.1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5}], %6;"                  \
+            : c(result), c(stub), c(stub), c(stub)                                             \
+            : "l"(texObj), "r"(x), "r"(mip));                                                  \
+        return result;                                                                         \
+    }                                                                                          \
+    template<>                                                                                 \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T##2 tex1Dfetch_int(CUtexObject texObj, int x, int mip) \
+    {                                                                                          \
+        T result_x, result_y;                                                                  \
+        T stub;                                                                                \
+        asm("tex.level.1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5}], %6;"                  \
+            : c(result_x), c(result_y), c(stub), c(stub)                                       \
+            : "l"(texObj), "r"(x), "r"(mip));                                                  \
+        return make_##T##2(result_x, result_y);                                                \
+    }                                                                                          \
+    template<>                                                                                 \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T##4 tex1Dfetch_int(CUtexObject texObj, int x, int mip) \
+    {                                                                                          \
+        T result_x, result_y, result_z, result_w;                                              \
+        asm("tex.level.1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5}], %6;"                  \
+            : c(result_x), c(result_y), c(result_z), c(result_w)                               \
+            : "l"(texObj), "r"(x), "r"(mip));                                                  \
+        return make_##T##4(result_x, result_y, result_z, result_w);                            \
+    }
+
+SLANG_TEX1DFETCH_INT_IMPL(float, "f32", "=f")
+SLANG_TEX1DFETCH_INT_IMPL(uint, "u32", "=r")
+SLANG_TEX1DFETCH_INT_IMPL(int, "s32", "=r")
+#endif
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL T tex2Dfetch_int(CUtexObject texObj, int x, int y, int mip);
+
+#define SLANG_TEX2DFETCH_INT_IMPL(T, dtype, c)                                                     \
+    template<>                                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T tex2Dfetch_int(CUtexObject texObj, int x, int y, int mip) \
+    {                                                                                              \
+        T result;                                                                                  \
+        T stub;                                                                                    \
+        asm("tex.level.2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;"                  \
+            : c(result), c(stub), c(stub), c(stub)                                                 \
+            : "l"(texObj), "r"(x), "r"(y), "r"(mip));                                              \
+        return result;                                                                             \
+    }                                                                                              \
+    template<>                                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                             \
+        T##2 tex2Dfetch_int(CUtexObject texObj, int x, int y, int mip)                             \
+    {                                                                                              \
+        T result_x, result_y;                                                                      \
+        T stub;                                                                                    \
+        asm("tex.level.2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;"                  \
+            : c(result_x), c(result_y), c(stub), c(stub)                                           \
+            : "l"(texObj), "r"(x), "r"(y), "r"(mip));                                              \
+        return make_##T##2(result_x, result_y);                                                    \
+    }                                                                                              \
+    template<>                                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                             \
+        T##4 tex2Dfetch_int(CUtexObject texObj, int x, int y, int mip)                             \
+    {                                                                                              \
+        T result_x, result_y, result_z, result_w;                                                  \
+        asm("tex.level.2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;"                  \
+            : c(result_x), c(result_y), c(result_z), c(result_w)                                   \
+            : "l"(texObj), "r"(x), "r"(y), "r"(mip));                                              \
+        return make_##T##4(result_x, result_y, result_z, result_w);                                \
+    }
+
+SLANG_TEX2DFETCH_INT_IMPL(float, "f32", "=f")
+SLANG_TEX2DFETCH_INT_IMPL(uint, "u32", "=r")
+SLANG_TEX2DFETCH_INT_IMPL(int, "s32", "=r")
+
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL T
+tex3Dfetch_int(CUtexObject texObj, int x, int y, int z, int mip);
+
+#define SLANG_TEX3DFETCH_INT_IMPL(T, dtype, c)                                            \
+    template<>                                                                            \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T                                                  \
+    tex3Dfetch_int(CUtexObject texObj, int x, int y, int z, int mip)                      \
+    {                                                                                     \
+        T result;                                                                         \
+        T stub;                                                                           \
+        asm("tex.level.3d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;" \
+            : c(result), c(stub), c(stub), c(stub)                                        \
+            : "l"(texObj), "r"(x), "r"(y), "r"(z), "r"(z) /* ignored */, "r"(mip));       \
+        return result;                                                                    \
+    }                                                                                     \
+    template<>                                                                            \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                    \
+        T##2 tex3Dfetch_int(CUtexObject texObj, int x, int y, int z, int mip)             \
+    {                                                                                     \
+        T result_x, result_y;                                                             \
+        T stub;                                                                           \
+        asm("tex.level.3d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;" \
+            : c(result_x), c(result_y), c(stub), c(stub)                                  \
+            : "l"(texObj), "r"(x), "r"(y), "r"(z), "r"(z) /* ignored */, "r"(mip));       \
+        return make_##T##2(result_x, result_y);                                           \
+    }                                                                                     \
+    template<>                                                                            \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                    \
+        T##4 tex3Dfetch_int(CUtexObject texObj, int x, int y, int z, int mip)             \
+    {                                                                                     \
+        T result_x, result_y, result_z, result_w;                                         \
+        asm("tex.level.3d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;" \
+            : c(result_x), c(result_y), c(result_z), c(result_w)                          \
+            : "l"(texObj), "r"(x), "r"(y), "r"(z), "r"(z) /* ignored */, "r"(mip));       \
+        return make_##T##4(result_x, result_y, result_z, result_w);                       \
+    }
+
+SLANG_TEX3DFETCH_INT_IMPL(float, "f32", "=f")
+SLANG_TEX3DFETCH_INT_IMPL(uint, "u32", "=r")
+SLANG_TEX3DFETCH_INT_IMPL(int, "s32", "=r")
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL T
+tex1DArrayfetch_int(CUtexObject texObj, int x, int layer, int mip);
+
+#define SLANG_TEX1DARRAYFETCH_INT_IMPL(T, dtype, c)                                \
+    template<>                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T                                           \
+    tex1DArrayfetch_int(CUtexObject texObj, int x, int layer, int mip)             \
+    {                                                                              \
+        T result;                                                                  \
+        T stub;                                                                    \
+        asm("tex.level.a1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;" \
+            : c(result), c(stub), c(stub), c(stub)                                 \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(mip));                          \
+        return result;                                                             \
+    }                                                                              \
+    template<>                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                             \
+        T##2 tex1DArrayfetch_int(CUtexObject texObj, int x, int layer, int mip)    \
+    {                                                                              \
+        T result_x, result_y;                                                      \
+        T stub;                                                                    \
+        asm("tex.level.a1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;" \
+            : c(result_x), c(result_y), c(stub), c(stub)                           \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(mip));                          \
+        return make_##T##2(result_x, result_y);                                    \
+    }                                                                              \
+    template<>                                                                     \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                             \
+        T##4 tex1DArrayfetch_int(CUtexObject texObj, int x, int layer, int mip)    \
+    {                                                                              \
+        T result_x, result_y, result_z, result_w;                                  \
+        asm("tex.level.a1d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6}], %7;" \
+            : c(result_x), c(result_y), c(result_z), c(result_w)                   \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(mip));                          \
+        return make_##T##4(result_x, result_y, result_z, result_w);                \
+    }
+
+SLANG_TEX1DARRAYFETCH_INT_IMPL(float, "f32", "=f")
+SLANG_TEX1DARRAYFETCH_INT_IMPL(uint, "u32", "=r")
+SLANG_TEX1DARRAYFETCH_INT_IMPL(int, "s32", "=r")
+
+template<typename T>
+SLANG_FORCE_INLINE SLANG_CUDA_CALL T
+tex2DArrayfetch_int(CUtexObject texObj, int x, int y, int layer, int mip);
+
+#define SLANG_TEX2DARRAYFETCH_INT_IMPL(T, dtype, c)                                         \
+    template<>                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL T                                                    \
+    tex2DArrayfetch_int(CUtexObject texObj, int x, int y, int layer, int mip)               \
+    {                                                                                       \
+        T result;                                                                           \
+        T stub;                                                                             \
+        asm("tex.level.a2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;"  \
+            : c(result), c(stub), c(stub), c(stub)                                          \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(y), "r"(layer) /* ignored */, "r"(mip)); \
+        return result;                                                                      \
+    }                                                                                       \
+    template<>                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                      \
+        T##2 tex2DArrayfetch_int(CUtexObject texObj, int x, int y, int layer, int mip)      \
+    {                                                                                       \
+        T result_x, result_y;                                                               \
+        T stub;                                                                             \
+        asm("tex.level.a2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;"  \
+            : c(result_x), c(result_y), c(stub), c(stub)                                    \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(y), "r"(layer) /* ignored */, "r"(mip)); \
+        return make_##T##2(result_x, result_y);                                             \
+    }                                                                                       \
+    template<>                                                                              \
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL                                                      \
+        T##4 tex2DArrayfetch_int(CUtexObject texObj, int x, int y, int layer, int mip)      \
+    {                                                                                       \
+        T result_x, result_y, result_z, result_w;                                           \
+        asm("tex.level.a2d.v4." dtype ".s32 {%0, %1, %2, %3}, [%4, {%5, %6, %7, %8}], %9;"  \
+            : c(result_x), c(result_y), c(result_z), c(result_w)                            \
+            : "l"(texObj), "r"(layer), "r"(x), "r"(y), "r"(layer) /* ignored */, "r"(mip)); \
+        return make_##T##4(result_x, result_y, result_z, result_w);                         \
+    }
+
+SLANG_TEX2DARRAYFETCH_INT_IMPL(float, "f32", "=f")
+SLANG_TEX2DARRAYFETCH_INT_IMPL(uint, "u32", "=r")
+SLANG_TEX2DARRAYFETCH_INT_IMPL(int, "s32", "=r")
+
+// Wave rotate helper functions - templated approach
+#define SLANG_WARP_FULL_MASK 0xFFFFFFFF
+
+// Macro-based wave rotate implementation following codebase patterns
+#define SLANG_WAVE_ROTATE_IMPL(T)                                                     \
+    __device__ __forceinline__ T##2 _slang_waveRotate(T##2 value, unsigned int delta) \
+    {                                                                                 \
+        return make_##T##2(                                                           \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.x,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.y,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE));                      \
+    }                                                                                 \
+    __device__ __forceinline__ T##3 _slang_waveRotate(T##3 value, unsigned int delta) \
+    {                                                                                 \
+        return make_##T##3(                                                           \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.x,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.y,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.z,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE));                      \
+    }                                                                                 \
+    __device__ __forceinline__ T##4 _slang_waveRotate(T##4 value, unsigned int delta) \
+    {                                                                                 \
+        return make_##T##4(                                                           \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.x,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.y,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.z,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE),                       \
+            (T)__shfl_sync(                                                           \
+                SLANG_WARP_FULL_MASK,                                                 \
+                value.w,                                                              \
+                (_getLaneId() + delta) % SLANG_CUDA_WARP_SIZE));                      \
+    }
+
+// Generate wave rotate functions for all standard vector types
+SLANG_WAVE_ROTATE_IMPL(uint)
+SLANG_WAVE_ROTATE_IMPL(int)
+SLANG_WAVE_ROTATE_IMPL(float)
+SLANG_WAVE_ROTATE_IMPL(short)
+SLANG_WAVE_ROTATE_IMPL(ushort)
+SLANG_WAVE_ROTATE_IMPL(char)
+SLANG_WAVE_ROTATE_IMPL(uchar)
+SLANG_WAVE_ROTATE_IMPL(longlong)
+SLANG_WAVE_ROTATE_IMPL(ulonglong)
+
+#ifdef SLANG_CUDA_ENABLE_HALF
+SLANG_WAVE_ROTATE_IMPL(__half)
+#endif
+
+// Special handling for boolean vectors (requires int conversion)
+__device__ __forceinline__ bool2 _slang_waveRotate(bool2 value, unsigned int delta)
+{
+    int2 intValue = make_int2((int)value.x, (int)value.y);
+    int2 result = _slang_waveRotate(intValue, delta);
+    return make_bool2((bool)result.x, (bool)result.y);
+}
+
+__device__ __forceinline__ bool3 _slang_waveRotate(bool3 value, unsigned int delta)
+{
+    int3 intValue = make_int3((int)value.x, (int)value.y, (int)value.z);
+    int3 result = _slang_waveRotate(intValue, delta);
+    return make_bool3((bool)result.x, (bool)result.y, (bool)result.z);
+}
+
+__device__ __forceinline__ bool4 _slang_waveRotate(bool4 value, unsigned int delta)
+{
+    int4 intValue = make_int4((int)value.x, (int)value.y, (int)value.z, (int)value.w);
+    int4 result = _slang_waveRotate(intValue, delta);
+    return make_bool4((bool)result.x, (bool)result.y, (bool)result.z, (bool)result.w);
+}
+
+#undef SLANG_WAVE_ROTATE_IMPL
+
+// Quad control operations for CUDA
+__device__ __forceinline__ bool _slang_quadAny(bool expr)
+{
+    // Get values from all 4 lanes in the quad
+    bool v0 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 0);
+    bool v1 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 1);
+    bool v2 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 2);
+    bool v3 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 3);
+    return v0 || v1 || v2 || v3;
+}
+
+__device__ __forceinline__ bool _slang_quadAll(bool expr)
+{
+    // Get values from all 4 lanes in the quad
+    bool v0 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 0);
+    bool v1 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 1);
+    bool v2 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 2);
+    bool v3 = __shfl_sync(0xFFFFFFFF, expr, (_getLaneId() & 0xFFFFFFFC) | 3);
+    return v0 && v1 && v2 && v3;
+}
+
+// Clustered wave rotate operations for CUDA
+// Clustered rotate rotates values within clusters of specified size
+#define SLANG_WAVE_CLUSTERED_ROTATE_IMPL(T)                                                       \
+    __device__ __forceinline__ T                                                                  \
+    _slang_waveClusteredRotate(T value, unsigned int delta, unsigned int clusterSize)             \
+    {                                                                                             \
+        unsigned int laneId = _getLaneId();                                                       \
+        unsigned int clusterStart = (laneId / clusterSize) * clusterSize;                         \
+        unsigned int targetLane = clusterStart + ((laneId - clusterStart + delta) % clusterSize); \
+        return __shfl_sync(SLANG_WARP_FULL_MASK, value, targetLane);                              \
+    }                                                                                             \
+    __device__ __forceinline__                                                                    \
+        T##2 _slang_waveClusteredRotate(T##2 value, unsigned int delta, unsigned int clusterSize) \
+    {                                                                                             \
+        unsigned int laneId = _getLaneId();                                                       \
+        unsigned int clusterStart = (laneId / clusterSize) * clusterSize;                         \
+        unsigned int targetLane = clusterStart + ((laneId - clusterStart + delta) % clusterSize); \
+        return make_##T##2(                                                                       \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.x, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.y, targetLane));                           \
+    }                                                                                             \
+    __device__ __forceinline__                                                                    \
+        T##3 _slang_waveClusteredRotate(T##3 value, unsigned int delta, unsigned int clusterSize) \
+    {                                                                                             \
+        unsigned int laneId = _getLaneId();                                                       \
+        unsigned int clusterStart = (laneId / clusterSize) * clusterSize;                         \
+        unsigned int targetLane = clusterStart + ((laneId - clusterStart + delta) % clusterSize); \
+        return make_##T##3(                                                                       \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.x, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.y, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.z, targetLane));                           \
+    }                                                                                             \
+    __device__ __forceinline__                                                                    \
+        T##4 _slang_waveClusteredRotate(T##4 value, unsigned int delta, unsigned int clusterSize) \
+    {                                                                                             \
+        unsigned int laneId = _getLaneId();                                                       \
+        unsigned int clusterStart = (laneId / clusterSize) * clusterSize;                         \
+        unsigned int targetLane = clusterStart + ((laneId - clusterStart + delta) % clusterSize); \
+        return make_##T##4(                                                                       \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.x, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.y, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.z, targetLane),                            \
+            (T)__shfl_sync(SLANG_WARP_FULL_MASK, value.w, targetLane));                           \
+    }
+
+// Generate clustered wave rotate functions for all standard types
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(uint)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(int)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(float)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(short)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(ushort)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(char)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(uchar)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(longlong)
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(ulonglong)
+
+#ifdef SLANG_CUDA_ENABLE_HALF
+SLANG_WAVE_CLUSTERED_ROTATE_IMPL(__half)
+#endif
+
+// Special handling for boolean clustered rotate
+__device__ __forceinline__ bool _slang_waveClusteredRotate(
+    bool value,
+    unsigned int delta,
+    unsigned int clusterSize)
+{
+    int intValue = (int)value;
+    int result = _slang_waveClusteredRotate(intValue, delta, clusterSize);
+    return (bool)result;
+}
+
+__device__ __forceinline__ bool2
+_slang_waveClusteredRotate(bool2 value, unsigned int delta, unsigned int clusterSize)
+{
+    int2 intValue = make_int2((int)value.x, (int)value.y);
+    int2 result = _slang_waveClusteredRotate(intValue, delta, clusterSize);
+    return make_bool2((bool)result.x, (bool)result.y);
+}
+
+__device__ __forceinline__ bool3
+_slang_waveClusteredRotate(bool3 value, unsigned int delta, unsigned int clusterSize)
+{
+    int3 intValue = make_int3((int)value.x, (int)value.y, (int)value.z);
+    int3 result = _slang_waveClusteredRotate(intValue, delta, clusterSize);
+    return make_bool3((bool)result.x, (bool)result.y, (bool)result.z);
+}
+
+__device__ __forceinline__ bool4
+_slang_waveClusteredRotate(bool4 value, unsigned int delta, unsigned int clusterSize)
+{
+    int4 intValue = make_int4((int)value.x, (int)value.y, (int)value.z, (int)value.w);
+    int4 result = _slang_waveClusteredRotate(intValue, delta, clusterSize);
+    return make_bool4((bool)result.x, (bool)result.y, (bool)result.z, (bool)result.w);
+}
+
+#undef SLANG_WAVE_CLUSTERED_ROTATE_IMPL
+
+
+// ---------------------- OptiX Cooperative Vector Wrappers --------------------------------------
+#ifdef SLANG_CUDA_ENABLE_OPTIX
+
+#if (OPTIX_VERSION >= 90000)
+
+// Constexpr function to map Slang component type enum to OptiX cooperative vector element type
+__host__ __device__ constexpr OptixCoopVecElemType slangToOptixComponentType(unsigned slangEnum)
+{
+    switch (slangEnum)
+    {
+    case 0:
+        return OPTIX_COOP_VEC_ELEM_TYPE_FLOAT8_E4M3; // FloatE4M3
+    case 1:
+        return OPTIX_COOP_VEC_ELEM_TYPE_FLOAT8_E5M2; // FloatE5M2
+    case 2:
+        return OPTIX_COOP_VEC_ELEM_TYPE_FLOAT16; // Float16
+    case 3:
+        return OPTIX_COOP_VEC_ELEM_TYPE_FLOAT32; // Float32
+    case 5:
+        return OPTIX_COOP_VEC_ELEM_TYPE_INT8; // SignedInt8
+    case 7:
+        return OPTIX_COOP_VEC_ELEM_TYPE_INT32; // SignedInt32
+    case 10:
+        return OPTIX_COOP_VEC_ELEM_TYPE_UINT8; // UnsignedInt8
+    case 12:
+        return OPTIX_COOP_VEC_ELEM_TYPE_UINT32; // UnsignedInt32
+    default:
+        return OPTIX_COOP_VEC_ELEM_TYPE_FLOAT32; // Default
+    }
+}
+
+// Constexpr function to map Slang matrix layout enum to OptiX cooperative vector matrix layout
+__host__ __device__ constexpr OptixCoopVecMatrixLayout slangToOptixMatrixLayout(unsigned slangEnum)
+{
+    switch (slangEnum)
+    {
+    case 0:
+        return OPTIX_COOP_VEC_MATRIX_LAYOUT_ROW_MAJOR; // RowMajor
+    case 1:
+        return OPTIX_COOP_VEC_MATRIX_LAYOUT_COLUMN_MAJOR; // ColumnMajor
+    case 2:
+        return OPTIX_COOP_VEC_MATRIX_LAYOUT_INFERENCING_OPTIMAL; // InferencingOptimal
+    case 3:
+        return OPTIX_COOP_VEC_MATRIX_LAYOUT_TRAINING_OPTIMAL; // TrainingOptimal
+    default:
+        return OPTIX_COOP_VEC_MATRIX_LAYOUT_ROW_MAJOR; // Default
+    }
+}
+
+// Wrapper structs to maintain compatibility with existing template-based interface
+template<unsigned SlangEnum>
+struct SlangToOptixComponentType
+{
+    static constexpr OptixCoopVecElemType value = slangToOptixComponentType(SlangEnum);
+};
+
+template<unsigned SlangEnum>
+struct SlangToOptixMatrixLayout
+{
+    static constexpr OptixCoopVecMatrixLayout value = slangToOptixMatrixLayout(SlangEnum);
+};
+
+// Template trait to extract vector size from OptixCoopVec<T, N>
+// Conditional compilation for NVRTC compatibility
+template<typename T>
+struct OptixCoopVecTraits;
+
+// Template specialization for OptiX's OptixCoopVec - only enabled when cooperative vectors are
+// available NVRTC explicitly disables cooperative vectors by setting
+// OPTIX_INCLUDE_COOPERATIVE_VECTOR to 0
+#if defined(OPTIX_VERSION) && OPTIX_VERSION > 90000
+template<typename T, unsigned int N>
+struct OptixCoopVecTraits<OptixCoopVec<T, N>>
+{
+    static constexpr unsigned int size = N;
+};
+#endif
+
+template<
+    typename VecTOut,
+    typename VecTIn,
+    unsigned inputInterpretation,
+    unsigned matrixInterpretation,
+    unsigned matrixLayout>
+__forceinline__ __device__ VecTOut slangOptixCoopVecMatMul(
+    const VecTIn& inputVector,
+    CUdeviceptr matrix,
+    unsigned matrixOffset,
+    bool transpose,
+    unsigned matrixStride)
+{
+    constexpr unsigned N = OptixCoopVecTraits<VecTOut>::size; // Output vector size
+    constexpr unsigned K = OptixCoopVecTraits<VecTIn>::size;  // Input vector size
+
+    return optixCoopVecMatMul<
+        VecTOut,
+        VecTIn,
+        SlangToOptixComponentType<inputInterpretation>::value,
+        SlangToOptixMatrixLayout<matrixLayout>::value,
+        false,
+        N,
+        K,
+        SlangToOptixComponentType<matrixInterpretation>::value>(
+        inputVector,
+        matrix,
+        matrixOffset,
+        matrixStride);
+}
+
+// OptiX cooperative vector matrix multiplication wrapper (WITH bias - 6 runtime params)
+template<
+    typename VecTOut,
+    typename VecTIn,
+    unsigned inputInterpretation,
+    unsigned matrixInterpretation,
+    unsigned matrixLayout,
+    unsigned biasInterpretation>
+__forceinline__ __device__ VecTOut slangOptixCoopVecMatMul(
+    const VecTIn& inputVector,
+    CUdeviceptr matrix,
+    unsigned matrixOffset,
+    CUdeviceptr bias,
+    unsigned biasOffset,
+    unsigned matrixStride)
+{
+    constexpr unsigned N = OptixCoopVecTraits<VecTOut>::size; // Output vector size
+    constexpr unsigned K = OptixCoopVecTraits<VecTIn>::size;  // Input vector size
+
+    // Call OptiX SDK with bias (6 runtime parameters)
+    return optixCoopVecMatMul<
+        VecTOut,
+        VecTIn,
+        SlangToOptixComponentType<inputInterpretation>::value,
+        SlangToOptixMatrixLayout<matrixLayout>::value,
+        false,
+        N,
+        K,
+        SlangToOptixComponentType<matrixInterpretation>::value,
+        SlangToOptixComponentType<biasInterpretation>::value>(
+        inputVector,
+        matrix,
+        matrixOffset,
+        bias,
+        biasOffset,
+        matrixStride);
+}
+
+// OptiX cooperative vector matrix multiplication wrapper (WITHOUT bias, 4 runtime params -
+// StructuredBuffer variant)
+template<
+    typename VecTOut,
+    typename VecTIn,
+    unsigned inputInterpretation,
+    unsigned matrixInterpretation,
+    unsigned matrixLayout>
+__forceinline__ __device__ VecTOut slangOptixCoopVecMatMul(
+    const VecTIn& inputVector,
+    CUdeviceptr matrix,
+    unsigned matrixOffset,
+    unsigned matrixStride)
+{
+    constexpr unsigned N = OptixCoopVecTraits<VecTOut>::size; // Output vector size
+    constexpr unsigned K = OptixCoopVecTraits<VecTIn>::size;  // Input vector size
+
+    // Call OptiX SDK without bias and without transpose (4 runtime parameters)
+    return optixCoopVecMatMul<
+        VecTOut,
+        VecTIn,
+        SlangToOptixComponentType<inputInterpretation>::value,
+        SlangToOptixMatrixLayout<matrixLayout>::value,
+        false,
+        N,
+        K,
+        SlangToOptixComponentType<matrixInterpretation>::value>(
+        inputVector,
+        matrix,
+        matrixOffset,
+        matrixStride);
+}
+
+#endif // (OPTIX_VERSION >= 90000)
+
+#endif // SLANG_CUDA_ENABLE_OPTIX

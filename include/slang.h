@@ -1,6 +1,10 @@
 #ifndef SLANG_H
 #define SLANG_H
 
+#ifdef SLANG_USER_CONFIG
+    #include SLANG_USER_CONFIG
+#endif
+
 /** \file slang.h
 
 The Slang API provides services to compile, reflect, and specialize code
@@ -227,10 +231,9 @@ convention for interface methods.
 #if defined(_MSC_VER)
     #define SLANG_DLL_EXPORT __declspec(dllexport)
 #else
-    #if 0 && __GNUC__ >= 4
-// Didn't work on latest gcc on linux.. so disable for now
-// https://gcc.gnu.org/wiki/Visibility
-        #define SLANG_DLL_EXPORT __attribute__((dllexport))
+    #if SLANG_WINDOWS_FAMILY
+        #define SLANG_DLL_EXPORT \
+            __attribute__((dllexport)) __attribute__((__visibility__("default")))
     #else
         #define SLANG_DLL_EXPORT __attribute__((__visibility__("default")))
     #endif
@@ -260,7 +263,6 @@ convention for interface methods.
     #define SLANG_NO_INLINE __attribute__((noinline))
     #define SLANG_FORCE_INLINE inline __attribute__((always_inline))
     #define SLANG_BREAKPOINT(id) __builtin_trap();
-    #define SLANG_ALIGN_OF(T) __alignof__(T)
 #endif // SLANG_GCC_FAMILY
 
 #if SLANG_GCC_FAMILY || defined(__clang__)
@@ -273,11 +275,10 @@ convention for interface methods.
 #endif
 
 // Microsoft VC specific
-#if SLANG_MICROSOFT_FAMILY
+#if SLANG_VC
     #define SLANG_NO_INLINE __declspec(noinline)
     #define SLANG_FORCE_INLINE __forceinline
     #define SLANG_BREAKPOINT(id) __debugbreak();
-    #define SLANG_ALIGN_OF(T) __alignof(T)
 
     #define SLANG_INT64(x) (x##i64)
     #define SLANG_UINT64(x) (x##ui64)
@@ -305,7 +306,7 @@ convention for interface methods.
 /// SLANG_INLINE exists to have a way to inline consistent with SLANG_ALWAYS_INLINE
 #define SLANG_INLINE inline
 
-// If explicilty disabled and not set, set to not available
+// If explicitly disabled and not set, set to not available
 #if !defined(SLANG_HAS_EXCEPTIONS) && defined(SLANG_DISABLE_EXCEPTIONS)
     #define SLANG_HAS_EXCEPTIONS 0
 #endif
@@ -419,7 +420,7 @@ convention for interface methods.
     #endif
 #elif defined(__arm__)
     #define SLANG_PROCESSOR_ARM 1
-#elif defined(_M_ARM64) || defined(__aarch64__)
+#elif defined(_M_ARM64) || defined(__aarch64__) || defined(__ARM_ARCH_ISA_A64)
     #define SLANG_PROCESSOR_ARM_64 1
 #elif defined(__EMSCRIPTEN__)
     #define SLANG_PROCESSOR_WASM 1
@@ -488,9 +489,21 @@ convention for interface methods.
     #define SLANG_UNALIGNED_ACCESS 0
 #endif
 
-// One endianess must be set
+// Backtrace
+#if SLANG_LINUX_FAMILY
+    #include <features.h> // for __GLIBC__ define, if using GNU libc
+    #if defined(__GLIBC__) || (__ANDROID_API__ >= 33)
+        #define SLANG_HAS_BACKTRACE 1
+    #else
+        #define SLANG_HAS_BACKTRACE 0
+    #endif
+#else
+    #define SLANG_HAS_BACKTRACE 0
+#endif
+
+// One endianness must be set
 #if ((SLANG_BIG_ENDIAN | SLANG_LITTLE_ENDIAN) == 0)
-    #error "Couldn't determine endianess"
+    #error "Couldn't determine endianness"
 #endif
 
 #ifndef SLANG_NO_INTTYPES
@@ -500,6 +513,12 @@ convention for interface methods.
 #ifndef SLANG_NO_STDDEF
     #include <stddef.h>
 #endif // ! SLANG_NO_STDDEF
+
+#ifdef SLANG_NO_DEPRECATION
+    #define SLANG_DEPRECATED
+#else
+    #define SLANG_DEPRECATED [[deprecated]]
+#endif
 
 #ifdef __cplusplus
 extern "C"
@@ -551,7 +570,7 @@ typedef uint32_t SlangSizeT;
     {
         SLANG_SEVERITY_DISABLED = 0, /**< A message that is disabled, filtered out. */
         SLANG_SEVERITY_NOTE,         /**< An informative message. */
-        SLANG_SEVERITY_WARNING,      /**< A warning, which indicates a possible proble. */
+        SLANG_SEVERITY_WARNING,      /**< A warning, which indicates a possible problem. */
         SLANG_SEVERITY_ERROR,        /**< An error, indicating that compilation failed. */
         SLANG_SEVERITY_FATAL,    /**< An unrecoverable error, which forced compilation to abort. */
         SLANG_SEVERITY_INTERNAL, /**< An internal error, indicating a logic error in the compiler.
@@ -619,6 +638,8 @@ typedef uint32_t SlangSizeT;
         SLANG_WGSL,                  ///< WebGPU shading language
         SLANG_WGSL_SPIRV_ASM,        ///< SPIR-V assembly via WebGPU shading language
         SLANG_WGSL_SPIRV,            ///< SPIR-V via WebGPU shading language
+
+        SLANG_HOST_VM, ///< Bytecode that can be interpreted by the Slang VM
         SLANG_TARGET_COUNT_OF,
     };
 
@@ -654,6 +675,7 @@ typedef uint32_t SlangSizeT;
         SLANG_PASS_THROUGH_SPIRV_OPT,     ///< SPIRV-opt
         SLANG_PASS_THROUGH_METAL,         ///< Metal compiler
         SLANG_PASS_THROUGH_TINT,          ///< Tint WGSL compiler
+        SLANG_PASS_THROUGH_SPIRV_LINK,    ///< SPIRV-link
         SLANG_PASS_THROUGH_COUNT_OF,
     };
 
@@ -716,7 +738,7 @@ typedef uint32_t SlangSizeT;
         // This flag will be deprecated, use CompilerOption instead.
         SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY = 1 << 10,
     };
-    constexpr static SlangTargetFlags kDefaultTargetFlags =
+    inline constexpr SlangTargetFlags kDefaultTargetFlags =
         SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
 
     /*!
@@ -728,6 +750,17 @@ typedef uint32_t SlangSizeT;
         SLANG_FLOATING_POINT_MODE_DEFAULT = 0,
         SLANG_FLOATING_POINT_MODE_FAST,
         SLANG_FLOATING_POINT_MODE_PRECISE,
+    };
+
+    /*!
+    @brief Options to control floating-point denormal handling mode for a target.
+    */
+    typedef unsigned int SlangFpDenormalModeIntegral;
+    enum SlangFpDenormalMode : SlangFpDenormalModeIntegral
+    {
+        SLANG_FP_DENORM_MODE_ANY = 0,
+        SLANG_FP_DENORM_MODE_PRESERVE,
+        SLANG_FP_DENORM_MODE_FTZ,
     };
 
     /*!
@@ -801,6 +834,9 @@ typedef uint32_t SlangSizeT;
         SLANG_STAGE_CALLABLE,
         SLANG_STAGE_MESH,
         SLANG_STAGE_AMPLIFICATION,
+        SLANG_STAGE_DISPATCH,
+        //
+        SLANG_STAGE_COUNT,
 
         // alias:
         SLANG_STAGE_PIXEL = SLANG_STAGE_FRAGMENT,
@@ -811,10 +847,10 @@ typedef uint32_t SlangSizeT;
     {
         SLANG_DEBUG_INFO_LEVEL_NONE = 0, /**< Don't emit debug information at all. */
         SLANG_DEBUG_INFO_LEVEL_MINIMAL,  /**< Emit as little debug information as possible, while
-                                            still supporting stack trackes. */
+                                            still supporting stack trackers. */
         SLANG_DEBUG_INFO_LEVEL_STANDARD, /**< Emit whatever is the standard level of debug
                                             information for each target. */
-        SLANG_DEBUG_INFO_LEVEL_MAXIMAL,  /**< Emit as much debug infromation as possible for each
+        SLANG_DEBUG_INFO_LEVEL_MAXIMAL,  /**< Emit as much debug information as possible for each
                                             target. */
     };
 
@@ -823,8 +859,8 @@ typedef uint32_t SlangSizeT;
     enum SlangDebugInfoFormat : SlangDebugInfoFormatIntegral
     {
         SLANG_DEBUG_INFO_FORMAT_DEFAULT, ///< Use the default debugging format for the target
-        SLANG_DEBUG_INFO_FORMAT_C7, ///< CodeView C7 format (typically means debugging infomation is
-                                    ///< embedded in the binary)
+        SLANG_DEBUG_INFO_FORMAT_C7,  ///< CodeView C7 format (typically means debugging information
+                                     ///< is embedded in the binary)
         SLANG_DEBUG_INFO_FORMAT_PDB, ///< Program database
 
         SLANG_DEBUG_INFO_FORMAT_STABS, ///< Stabs
@@ -897,7 +933,6 @@ typedef uint32_t SlangSizeT;
         DisableSourceMap,               // bool
         UnscopedEnum,                   // bool
         PreserveParameters, // bool: preserve all resource parameters in the output code.
-
         // Target
 
         Capability,                // intValue0: CapabilityName
@@ -955,9 +990,9 @@ typedef uint32_t SlangSizeT;
         PreprocessorOutput,
         OutputIncludes,
         ReproFileSystem,
-        SerialIr,    // bool
-        SkipCodeGen, // bool
-        ValidateIr,  // bool
+        REMOVED_SerialIR, // deprecated and removed
+        SkipCodeGen,      // bool
+        ValidateIr,       // bool
         VerbosePaths,
         VerifyDebugSerialIr,
         NoCodeGen, // Not used.
@@ -972,13 +1007,16 @@ typedef uint32_t SlangSizeT;
         ValidateUniformity,
         AllowGLSL,
         EnableExperimentalPasses,
+        BindlessSpaceIndex, // int
 
         // Internal
 
         ArchiveType,
         CompileCoreModule,
         Doc,
-        IrCompression,
+
+        IrCompression, //< deprecated
+
         LoadCoreModule,
         ReferenceModule,
         SaveCoreModule,
@@ -986,8 +1024,13 @@ typedef uint32_t SlangSizeT;
         TrackLiveness,
         LoopInversion, // bool, enable loop inversion optimization
 
-        // Deprecated
-        ParameterBlocksUseRegisterSpaces,
+        ParameterBlocksUseRegisterSpaces, // Deprecated
+        LanguageVersion,                  // intValue0: SlangLanguageVersion
+        TypeConformance, // stringValue0: additional type conformance to link, in the format of
+                         // "<TypeName>:<IInterfaceName>[=<sequentialId>]", for example
+                         // "Impl:IFoo=3" or "Impl:IFoo".
+        EnableExperimentalDynamicDispatch, // bool, experimental
+        EmitReflectionJSON,                // bool
 
         CountOfParsableOptions,
 
@@ -1003,6 +1046,29 @@ typedef uint32_t SlangSizeT;
         // Add this new option to the end of the list to avoid breaking ABI as much as possible.
         // Setting of EmitSpirvDirectly or EmitSpirvViaGLSL will turn into this option internally.
         EmitSpirvMethod, // enum SlangEmitSpirvMethod
+
+        SaveGLSLModuleBinSource,
+
+        SkipDownstreamLinking, // bool, experimental
+        DumpModule,
+
+        GetModuleInfo,              // Print serialized module version and name
+        GetSupportedModuleVersions, // Print the min and max module versions this compiler supports
+
+        EmitSeparateDebug, // bool
+
+        // Floating point denormal handling modes
+        DenormalModeFp16,
+        DenormalModeFp32,
+        DenormalModeFp64,
+
+        // Bitfield options
+        UseMSVCStyleBitfieldPacking, // bool
+
+        ForceCLayout, // bool
+
+        ExperimentalFeature, // bool, enable experimental features
+
         CountOf,
     };
 
@@ -1774,6 +1840,7 @@ public:                                                              \
     typedef struct SlangReflectionVariableLayout SlangReflectionVariableLayout;
     typedef struct SlangReflectionTypeParameter SlangReflectionTypeParameter;
     typedef struct SlangReflectionUserAttribute SlangReflectionUserAttribute;
+    typedef SlangReflectionUserAttribute SlangReflectionAttribute;
     typedef struct SlangReflectionFunction SlangReflectionFunction;
     typedef struct SlangReflectionGeneric SlangReflectionGeneric;
 
@@ -1880,12 +1947,13 @@ public:                                                              \
         SLANG_ACCELERATION_STRUCTURE = 0x09,
         SLANG_TEXTURE_SUBPASS = 0x0A,
 
-        SLANG_RESOURCE_EXT_SHAPE_MASK = 0xF0,
+        SLANG_RESOURCE_EXT_SHAPE_MASK = 0x1F0,
 
         SLANG_TEXTURE_FEEDBACK_FLAG = 0x10,
         SLANG_TEXTURE_SHADOW_FLAG = 0x20,
         SLANG_TEXTURE_ARRAY_FLAG = 0x40,
         SLANG_TEXTURE_MULTISAMPLE_FLAG = 0x80,
+        SLANG_TEXTURE_COMBINED_FLAG = 0x100,
 
         SLANG_TEXTURE_1D_ARRAY = SLANG_TEXTURE_1D | SLANG_TEXTURE_ARRAY_FLAG,
         SLANG_TEXTURE_2D_ARRAY = SLANG_TEXTURE_2D | SLANG_TEXTURE_ARRAY_FLAG,
@@ -1956,14 +2024,14 @@ public:                                                              \
         // This `MyParams` type introduces two existential type parameters:
         // one for `material` and one for `lights`. Even though `lights`
         // is an array, it only introduces one type parameter, because
-        // we need to hae a *single* concrete type for all the array
+        // we need to have a *single* concrete type for all the array
         // elements to be able to generate specialized code.
         //
         SLANG_PARAMETER_CATEGORY_EXISTENTIAL_TYPE_PARAM,
 
         // An existential object parameter represents a value
         // that needs to be passed in to provide data for some
-        // interface-type shader paameter.
+        // interface-type shader parameter.
         //
         // Consider this example:
         //
@@ -2023,13 +2091,13 @@ public:                                                              \
     parameters of different types as occupying the same binding space for layout
     (e.g., in SPIR-V both a `Texture2D` and `SamplerState` use the same space of
     `binding` indices, and are not allowed to overlap), while those same types
-    map to different types of bindingsin the API (e.g., both textures and samplers
+    map to different types of bindings in the API (e.g., both textures and samplers
     use different `VkDescriptorType` values).
 
     When you want to answer "what register/binding did this parameter use?" you
     should use `SlangParameterCategory`.
 
-    When you wnat to answer "what type of descriptor range should this parameter use?"
+    When you want to answer "what type of descriptor range should this parameter use?"
     you should use `SlangBindingType`.
     */
     typedef SlangUInt32 SlangBindingTypeIntegral;
@@ -2138,45 +2206,47 @@ union GenericArgReflection
     bool boolVal;
 };
 
-struct UserAttribute
+struct Attribute
 {
     char const* getName()
     {
-        return spReflectionUserAttribute_GetName((SlangReflectionUserAttribute*)this);
+        return spReflectionUserAttribute_GetName((SlangReflectionAttribute*)this);
     }
     uint32_t getArgumentCount()
     {
         return (uint32_t)spReflectionUserAttribute_GetArgumentCount(
-            (SlangReflectionUserAttribute*)this);
+            (SlangReflectionAttribute*)this);
     }
     TypeReflection* getArgumentType(uint32_t index)
     {
         return (TypeReflection*)spReflectionUserAttribute_GetArgumentType(
-            (SlangReflectionUserAttribute*)this,
+            (SlangReflectionAttribute*)this,
             index);
     }
     SlangResult getArgumentValueInt(uint32_t index, int* value)
     {
         return spReflectionUserAttribute_GetArgumentValueInt(
-            (SlangReflectionUserAttribute*)this,
+            (SlangReflectionAttribute*)this,
             index,
             value);
     }
     SlangResult getArgumentValueFloat(uint32_t index, float* value)
     {
         return spReflectionUserAttribute_GetArgumentValueFloat(
-            (SlangReflectionUserAttribute*)this,
+            (SlangReflectionAttribute*)this,
             index,
             value);
     }
     const char* getArgumentValueString(uint32_t index, size_t* outSize)
     {
         return spReflectionUserAttribute_GetArgumentValueString(
-            (SlangReflectionUserAttribute*)this,
+            (SlangReflectionAttribute*)this,
             index,
             outSize);
     }
 };
+
+typedef Attribute UserAttribute;
 
 struct TypeReflection
 {
@@ -2201,6 +2271,7 @@ struct TypeReflection
         Feedback = SLANG_TYPE_KIND_FEEDBACK,
         Pointer = SLANG_TYPE_KIND_POINTER,
         DynamicResource = SLANG_TYPE_KIND_DYNAMIC_RESOURCE,
+        MeshOutput = SLANG_TYPE_KIND_MESH_OUTPUT,
     };
 
     enum ScalarType : SlangScalarTypeIntegral
@@ -2248,9 +2319,9 @@ struct TypeReflection
     }
 
     // only useful if `getKind() == Kind::Array`
-    size_t getElementCount()
+    size_t getElementCount(SlangReflection* reflection = nullptr)
     {
-        return spReflectionType_GetElementCount((SlangReflectionType*)this);
+        return spReflectionType_GetSpecializedElementCount((SlangReflectionType*)this, reflection);
     }
 
     size_t getTotalArrayElementCount()
@@ -2318,12 +2389,14 @@ struct TypeReflection
         return (UserAttribute*)spReflectionType_GetUserAttribute((SlangReflectionType*)this, index);
     }
 
-    UserAttribute* findUserAttributeByName(char const* name)
+    UserAttribute* findAttributeByName(char const* name)
     {
         return (UserAttribute*)spReflectionType_FindUserAttributeByName(
             (SlangReflectionType*)this,
             name);
     }
+
+    UserAttribute* findUserAttributeByName(char const* name) { return findAttributeByName(name); }
 
     TypeReflection* applySpecializations(GenericReflection* generic)
     {
@@ -2409,6 +2482,8 @@ enum class BindingType : SlangBindingTypeIntegral
     ExtMask = SLANG_BINDING_TYPE_EXT_MASK,
 };
 
+struct ShaderReflection;
+
 struct TypeLayoutReflection
 {
     TypeReflection* getType()
@@ -2422,20 +2497,42 @@ struct TypeLayoutReflection
             (SlangReflectionTypeLayout*)this);
     }
 
-    size_t getSize(SlangParameterCategory category = SLANG_PARAMETER_CATEGORY_UNIFORM)
+    size_t getSize(SlangParameterCategory category)
     {
         return spReflectionTypeLayout_GetSize((SlangReflectionTypeLayout*)this, category);
     }
 
-    size_t getStride(SlangParameterCategory category = SLANG_PARAMETER_CATEGORY_UNIFORM)
+    size_t getStride(SlangParameterCategory category)
     {
         return spReflectionTypeLayout_GetStride((SlangReflectionTypeLayout*)this, category);
     }
 
-    int32_t getAlignment(SlangParameterCategory category = SLANG_PARAMETER_CATEGORY_UNIFORM)
+    int32_t getAlignment(SlangParameterCategory category)
     {
         return spReflectionTypeLayout_getAlignment((SlangReflectionTypeLayout*)this, category);
     }
+
+    size_t getSize(slang::ParameterCategory category = slang::ParameterCategory::Uniform)
+    {
+        return spReflectionTypeLayout_GetSize(
+            (SlangReflectionTypeLayout*)this,
+            (SlangParameterCategory)category);
+    }
+
+    size_t getStride(slang::ParameterCategory category = slang::ParameterCategory::Uniform)
+    {
+        return spReflectionTypeLayout_GetStride(
+            (SlangReflectionTypeLayout*)this,
+            (SlangParameterCategory)category);
+    }
+
+    int32_t getAlignment(slang::ParameterCategory category = slang::ParameterCategory::Uniform)
+    {
+        return spReflectionTypeLayout_getAlignment(
+            (SlangReflectionTypeLayout*)this,
+            (SlangParameterCategory)category);
+    }
+
 
     unsigned int getFieldCount()
     {
@@ -2476,7 +2573,10 @@ struct TypeLayoutReflection
     }
 
     // only useful if `getKind() == Kind::Array`
-    size_t getElementCount() { return getType()->getElementCount(); }
+    size_t getElementCount(ShaderReflection* reflection = nullptr)
+    {
+        return getType()->getElementCount((SlangReflection*)reflection);
+    }
 
     size_t getTotalArrayElementCount() { return getType()->getTotalArrayElementCount(); }
 
@@ -2546,17 +2646,13 @@ struct TypeLayoutReflection
         return spReflectionTypeLayout_getGenericParamIndex((SlangReflectionTypeLayout*)this);
     }
 
-    TypeLayoutReflection* getPendingDataTypeLayout()
-    {
-        return (TypeLayoutReflection*)spReflectionTypeLayout_getPendingDataTypeLayout(
-            (SlangReflectionTypeLayout*)this);
-    }
+    // Pending Type Layout functionality has been removed
+    [[deprecated]] TypeLayoutReflection* getPendingDataTypeLayout() { return nullptr; }
 
-    VariableLayoutReflection* getSpecializedTypePendingDataVarLayout()
+    // Pending Type Layout functionality has been removed
+    [[deprecated]] VariableLayoutReflection* getSpecializedTypePendingDataVarLayout()
     {
-        return (VariableLayoutReflection*)
-            spReflectionTypeLayout_getSpecializedTypePendingDataVarLayout(
-                (SlangReflectionTypeLayout*)this);
+        return nullptr;
     }
 
     SlangInt getBindingRangeCount()
@@ -2775,14 +2871,14 @@ struct VariableReflection
         return spReflectionVariable_GetUserAttributeCount((SlangReflectionVariable*)this);
     }
 
-    UserAttribute* getUserAttributeByIndex(unsigned int index)
+    Attribute* getUserAttributeByIndex(unsigned int index)
     {
         return (UserAttribute*)spReflectionVariable_GetUserAttribute(
             (SlangReflectionVariable*)this,
             index);
     }
 
-    UserAttribute* findUserAttributeByName(SlangSession* globalSession, char const* name)
+    Attribute* findAttributeByName(SlangSession* globalSession, char const* name)
     {
         return (UserAttribute*)spReflectionVariable_FindUserAttributeByName(
             (SlangReflectionVariable*)this,
@@ -2790,9 +2886,19 @@ struct VariableReflection
             name);
     }
 
+    Attribute* findUserAttributeByName(SlangSession* globalSession, char const* name)
+    {
+        return findAttributeByName(globalSession, name);
+    }
+
     bool hasDefaultValue()
     {
         return spReflectionVariable_HasDefaultValue((SlangReflectionVariable*)this);
+    }
+
+    SlangResult getDefaultValueInt(int64_t* value)
+    {
+        return spReflectionVariable_GetDefaultValueInt((SlangReflectionVariable*)this, value);
     }
 
     GenericReflection* getGenericContainer()
@@ -2837,10 +2943,17 @@ struct VariableLayoutReflection
     }
 
 
-    size_t getOffset(SlangParameterCategory category = SLANG_PARAMETER_CATEGORY_UNIFORM)
+    size_t getOffset(SlangParameterCategory category)
     {
         return spReflectionVariableLayout_GetOffset((SlangReflectionVariableLayout*)this, category);
     }
+    size_t getOffset(slang::ParameterCategory category = slang::ParameterCategory::Uniform)
+    {
+        return spReflectionVariableLayout_GetOffset(
+            (SlangReflectionVariableLayout*)this,
+            (SlangParameterCategory)category);
+    }
+
 
     TypeReflection* getType() { return getVariable()->getType(); }
 
@@ -2858,6 +2971,17 @@ struct VariableLayoutReflection
     {
         return spReflectionVariableLayout_GetSpace((SlangReflectionVariableLayout*)this, category);
     }
+    size_t getBindingSpace(slang::ParameterCategory category)
+    {
+        return spReflectionVariableLayout_GetSpace(
+            (SlangReflectionVariableLayout*)this,
+            (SlangParameterCategory)category);
+    }
+
+    SlangImageFormat getImageFormat()
+    {
+        return spReflectionVariableLayout_GetImageFormat((SlangReflectionVariableLayout*)this);
+    }
 
     char const* getSemanticName()
     {
@@ -2874,11 +2998,8 @@ struct VariableLayoutReflection
         return spReflectionVariableLayout_getStage((SlangReflectionVariableLayout*)this);
     }
 
-    VariableLayoutReflection* getPendingDataLayout()
-    {
-        return (VariableLayoutReflection*)spReflectionVariableLayout_getPendingDataLayout(
-            (SlangReflectionVariableLayout*)this);
-    }
+    // Pending Type Layout functionality has been removed
+    [[deprecated]] VariableLayoutReflection* getPendingDataLayout() { return nullptr; }
 };
 
 struct FunctionReflection
@@ -2906,20 +3027,22 @@ struct FunctionReflection
     {
         return spReflectionFunction_GetUserAttributeCount((SlangReflectionFunction*)this);
     }
-    UserAttribute* getUserAttributeByIndex(unsigned int index)
+    Attribute* getUserAttributeByIndex(unsigned int index)
     {
-        return (UserAttribute*)spReflectionFunction_GetUserAttribute(
-            (SlangReflectionFunction*)this,
-            index);
+        return (
+            Attribute*)spReflectionFunction_GetUserAttribute((SlangReflectionFunction*)this, index);
     }
-    UserAttribute* findUserAttributeByName(SlangSession* globalSession, char const* name)
+    Attribute* findAttributeByName(SlangSession* globalSession, char const* name)
     {
-        return (UserAttribute*)spReflectionFunction_FindUserAttributeByName(
+        return (Attribute*)spReflectionFunction_FindUserAttributeByName(
             (SlangReflectionFunction*)this,
             globalSession,
             name);
     }
-
+    Attribute* findUserAttributeByName(SlangSession* globalSession, char const* name)
+    {
+        return findAttributeByName(globalSession, name);
+    }
     Modifier* findModifier(Modifier::ID id)
     {
         return (Modifier*)spReflectionFunction_FindModifier(
@@ -3237,6 +3360,16 @@ struct ShaderReflection
             name);
     }
 
+    SLANG_DEPRECATED FunctionReflection* tryResolveOverloadedFunction(
+        uint32_t candidateCount,
+        FunctionReflection** candidates)
+    {
+        return (FunctionReflection*)spReflection_TryResolveOverloadedFunction(
+            (SlangReflection*)this,
+            candidateCount,
+            (SlangReflectionFunction**)candidates);
+    }
+
     VariableReflection* findVarByNameInType(TypeReflection* type, const char* name)
     {
         return (VariableReflection*)spReflection_FindVarByNameInType(
@@ -3320,6 +3453,11 @@ struct ShaderReflection
         return (VariableLayoutReflection*)spReflection_getGlobalParamsVarLayout(
             (SlangReflection*)this);
     }
+
+    SlangResult toJson(ISlangBlob** outBlob)
+    {
+        return spReflection_ToJson((SlangReflection*)this, nullptr, outBlob);
+    }
 };
 
 
@@ -3373,6 +3511,13 @@ struct DeclReflection
     DeclReflection* getParent()
     {
         return (DeclReflection*)spReflectionDecl_getParent((SlangReflectionDecl*)this);
+    }
+
+    Modifier* findModifier(Modifier::ID id)
+    {
+        return (Modifier*)spReflectionDecl_findModifier(
+            (SlangReflectionDecl*)this,
+            (SlangModifierID)id);
     }
 
     template<Kind K>
@@ -3463,6 +3608,12 @@ struct IModule;
 struct SessionDesc;
 struct SpecializationArg;
 struct TargetDesc;
+
+enum class BuiltinModuleName
+{
+    Core,
+    GLSL
+};
 
 /** A global session for interaction with the Slang library.
 
@@ -3594,7 +3745,7 @@ struct IGlobalSession : public ISlangUnknown
     */
     virtual SLANG_NO_THROW ISlangSharedLibraryLoader* SLANG_MCALL getSharedLibraryLoader() = 0;
 
-    /** Returns SLANG_OK if a the compilation target is supported for this session
+    /** Returns SLANG_OK if the compilation target is supported for this session
 
     @param target The compilation target to test
     @return SLANG_OK if the target is available
@@ -3604,7 +3755,7 @@ struct IGlobalSession : public ISlangUnknown
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL
     checkCompileTargetSupport(SlangCompileTarget target) = 0;
 
-    /** Returns SLANG_OK if a the pass through support is supported for this session
+    /** Returns SLANG_OK if the pass through support is supported for this session
     @param session Session
     @param target The compilation target to test
     @return SLANG_OK if the target is available
@@ -3682,7 +3833,7 @@ struct IGlobalSession : public ISlangUnknown
      *   @param argc The number of command line arguments.
      *   @param argv An input array of command line arguments to parse.
      *   @param outSessionDesc A pointer to a SessionDesc struct to receive parsed session desc.
-     *   @param outAuxAllocation Auxillary memory allocated to hold data used in the sesion desc.
+     *   @param outAuxAllocation Auxiliary memory allocated to hold data used in the session desc.
      */
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL parseCommandLineArguments(
         int argc,
@@ -3694,6 +3845,36 @@ struct IGlobalSession : public ISlangUnknown
      */
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL
     getSessionDescDigest(SessionDesc* sessionDesc, ISlangBlob** outBlob) = 0;
+
+    /** Compile from (embedded source) the builtin module on the session.
+    Will return a failure if there is already a builtin module available.
+    NOTE! API is experimental and not ready for production code.
+    @param module The builtin module name.
+    @param flags to control compilation
+    */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    compileBuiltinModule(BuiltinModuleName module, CompileCoreModuleFlags flags) = 0;
+
+    /** Load a builtin module. Currently loads modules from the file system.
+    @param module The builtin module name
+    @param moduleData Start address of the serialized core module
+    @param sizeInBytes The size in bytes of the serialized builtin module
+
+    NOTE! API is experimental and not ready for production code
+    */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    loadBuiltinModule(BuiltinModuleName module, const void* moduleData, size_t sizeInBytes) = 0;
+
+    /** Save the builtin module to the file system
+    @param module The builtin module name
+    @param archiveType The type of archive used to hold the builtin module
+    @param outBlob The serialized blob containing the builtin module
+
+    NOTE! API is experimental and not ready for production code  */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL saveBuiltinModule(
+        BuiltinModuleName module,
+        SlangArchiveType archiveType,
+        ISlangBlob** outBlob) = 0;
 };
 
     #define SLANG_UUID_IGlobalSession IGlobalSession::getTypeGuid()
@@ -3731,7 +3912,7 @@ struct TargetDesc
 
     /** Pointer to an array of compiler option entries, whose size is compilerOptionEntryCount.
      */
-    CompilerOptionEntry* compilerOptionEntries = nullptr;
+    const CompilerOptionEntry* compilerOptionEntries = nullptr;
 
     /** Number of additional compiler option entries.
      */
@@ -3789,6 +3970,10 @@ struct SessionDesc
     /** Number of additional compiler option entries.
      */
     uint32_t compilerOptionEntryCount = 0;
+
+    /** Whether to skip SPIRV validation.
+     */
+    bool skipSPIRVValidation = false;
 };
 
 enum class ContainerType
@@ -3808,7 +3993,7 @@ information.
 
 In order to be able to load code, the session owns a set
 of active "search paths" for resolving `#include` directives
-and `import` declrations, as well as a set of global
+and `import` declarations, as well as a set of global
 preprocessor definitions that will be used for all code
 that gets `import`ed in the session.
 
@@ -3873,7 +4058,7 @@ struct ISession : public ISlangUnknown
     function will return null.
 
     It is an error to create a composite component type that recursively
-    aggregates the a single module more than once.
+    aggregates a single module more than once.
     */
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL createCompositeComponentType(
         IComponentType* const* componentTypes,
@@ -3929,6 +4114,7 @@ struct ISession : public ISlangUnknown
         ISlangBlob** outNameBlob) = 0;
 
     /** Get the sequential ID used to identify a type witness in a dynamic object.
+        The sequential ID is part of the RTTI bytes returned by `getDynamicObjectRTTIBytes`.
      */
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL getTypeConformanceWitnessSequentialID(
         slang::TypeReflection* type,
@@ -3946,7 +4132,7 @@ struct ISession : public ISlangUnknown
         to explicitly specify which implementation types should be included in the final compiled
         code. For example, if an module defines `IMaterial` interface and `AMaterial`,
         `BMaterial`, `CMaterial` types that implements the interface, the user can exclude
-        `CMaterial` implementation from the resulting shader code by explcitly adding
+        `CMaterial` implementation from the resulting shader code by explicitly adding
         `AMaterial:IMaterial` and `BMaterial:IMaterial` conformances to a composite
         `IComponentType` and get entry point code from it. The resulting code will not have
         anything related to `CMaterial` in the dynamic dispatch logic. If the user does not
@@ -3990,6 +4176,47 @@ struct ISession : public ISlangUnknown
         const char* path,
         const char* string,
         slang::IBlob** outDiagnostics = nullptr) = 0;
+
+
+    /** Get the 16-byte RTTI header to fill into a dynamic object.
+        This header is used to identify the type of the object for dynamic dispatch purpose.
+        For example, given the following shader:
+
+        ```slang
+        [anyValueSize(32)] dyn interface IFoo { int eval(); }
+        struct Impl : IFoo { int eval() { return 1; } }
+
+        ConstantBuffer<dyn IFoo> cb0;
+
+        [numthreads(1,1,1)
+        void main()
+        {
+            cb0.eval();
+        }
+        ```
+
+        The constant buffer `cb0` should be filled with 16+32=48 bytes of data, where the first
+        16 bytes should be the RTTI bytes returned by calling `getDynamicObjectRTTIBytes(type_Impl,
+        type_IFoo)`, and the rest 32 bytes should hold the actual data of the dynamic object (in
+        this case, fields in the `Impl` type).
+
+        `bufferSizeInBytes` must be greater than 16.
+     */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL getDynamicObjectRTTIBytes(
+        slang::TypeReflection* type,
+        slang::TypeReflection* interfaceType,
+        uint32_t* outRTTIDataBuffer,
+        uint32_t bufferSizeInBytes) = 0;
+
+    /** Read module info (name and version) from a module blob
+     *
+     * The returned pointers are valid for as long as the session.
+     */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL loadModuleInfoFromIRBlob(
+        slang::IBlob* source,
+        SlangInt& outModuleVersion,
+        const char*& outModuleCompilerVersion,
+        const char*& outModuleName) = 0;
 };
 
     #define SLANG_UUID_ISession ISession::getTypeGuid()
@@ -3999,7 +4226,7 @@ struct IMetadata : public ISlangCastable
     SLANG_COM_INTERFACE(0x8044a8a3, 0xddc0, 0x4b7f, {0xaf, 0x8e, 0x2, 0x6e, 0x90, 0x5d, 0x73, 0x32})
 
     /*
-    Returns whether a resource parameter at the specifieid binding location is actually being used
+    Returns whether a resource parameter at the specified binding location is actually being used
     in the compiled shader.
     */
     virtual SlangResult isParameterLocationUsed(
@@ -4007,8 +4234,31 @@ struct IMetadata : public ISlangCastable
         SlangUInt spaceIndex,            // `space` for D3D12, `set` for Vulkan
         SlangUInt registerIndex,         // `register` for D3D12, `binding` for Vulkan
         bool& outUsed) = 0;
+
+    /*
+    Returns the debug build identifier for a base and debug spirv pair.
+    */
+    virtual const char* SLANG_MCALL getDebugBuildIdentifier() = 0;
 };
     #define SLANG_UUID_IMetadata IMetadata::getTypeGuid()
+
+/** Compile result for storing and retrieving multiple output blobs.
+    This is needed for features such as separate debug compilation which
+    output both base and debug spirv.
+ */
+struct ICompileResult : public ISlangCastable
+{
+    SLANG_COM_INTERFACE(
+        0x5fa9380e,
+        0xb62f,
+        0x41e5,
+        {0x9f, 0x12, 0x4b, 0xad, 0x4d, 0x9e, 0xaa, 0xe4})
+
+    virtual uint32_t SLANG_MCALL getItemCount() = 0;
+    virtual SlangResult SLANG_MCALL getItemData(uint32_t index, IBlob** outblob) = 0;
+    virtual SlangResult SLANG_MCALL getMetadata(IMetadata** outMetadata) = 0;
+};
+    #define SLANG_UUID_ICompileResult ICompileResult::getTypeGuid()
 
 /** A component type is a unit of shader code layout, reflection, and linking.
 
@@ -4129,7 +4379,7 @@ struct IComponentType : public ISlangUnknown
 
     Has the same requirements as getEntryPointCode.
 
-    The result is not written to the actual OS file system, but is made avaiable as an
+    The result is not written to the actual OS file system, but is made available as an
     in memory representation.
     */
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL getResultAsFileSystem(
@@ -4159,7 +4409,7 @@ struct IComponentType : public ISlangUnknown
         IComponentType** outSpecializedComponentType,
         ISlangBlob** outDiagnostics = nullptr) = 0;
 
-    /** Link this component type against all of its unsatisifed dependencies.
+    /** Link this component type against all of its unsatisfied dependencies.
 
     A component type may have unsatisfied dependencies. For example, a module
     depends on any other modules it `import`s, and an entry point depends
@@ -4172,7 +4422,7 @@ struct IComponentType : public ISlangUnknown
     It is an error to try to generate/access compiled kernel code for
     a component type with unresolved dependencies, so if dependencies
     remain after whatever manual composition steps an application
-    cares to peform, the `link()` function can be used to automatically
+    cares to perform, the `link()` function can be used to automatically
     compose in any remaining dependencies. The order of parameters
     (and hence the global layout) that results will be deterministic,
     but is not currently documented.
@@ -4246,6 +4496,35 @@ struct ITypeConformance : public IComponentType
 };
     #define SLANG_UUID_ITypeConformance ITypeConformance::getTypeGuid()
 
+/** IComponentType2 is a component type used for getting separate debug data.
+
+This interface is used for getting separate debug data, introduced here to
+avoid breaking backwards compatibility of the IComponentType interface.
+
+The `getTargetCompileResult` and `getEntryPointCompileResult` functions
+are used to get the base and debug spirv, and metadata containing the
+debug build identifier.
+*/
+struct IComponentType2 : public ISlangUnknown
+{
+    SLANG_COM_INTERFACE(
+        0x9c2a4b3d,
+        0x7f68,
+        0x4e91,
+        {0xa5, 0x2c, 0x8b, 0x19, 0x3e, 0x45, 0x7a, 0x9f})
+
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL getTargetCompileResult(
+        SlangInt targetIndex,
+        ICompileResult** outCompileResult,
+        IBlob** outDiagnostics = nullptr) = 0;
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL getEntryPointCompileResult(
+        SlangInt entryPointIndex,
+        SlangInt targetIndex,
+        ICompileResult** outCompileResult,
+        IBlob** outDiagnostics = nullptr) = 0;
+};
+    #define SLANG_UUID_IComponentType2 IComponentType2::getTypeGuid()
+
 /** A module is the granularity of shader code compilation and loading.
 
 In most cases a module corresponds to a single compile "translation unit."
@@ -4263,6 +4542,10 @@ struct IModule : public IComponentType
 {
     SLANG_COM_INTERFACE(0xc720e64, 0x8722, 0x4d31, {0x89, 0x90, 0x63, 0x8a, 0x98, 0xb1, 0xc2, 0x79})
 
+    /// Find and an entry point by name.
+    /// Note that this does not work in case the function is not explicitly designated as an entry
+    /// point, e.g. using a `[shader("...")]` attribute. In such cases, consider using
+    /// `IModule::findAndCheckEntryPoint` instead.
     virtual SLANG_NO_THROW SlangResult SLANG_MCALL
     findEntryPointByName(char const* name, IEntryPoint** outEntryPoint) = 0;
 
@@ -4308,6 +4591,11 @@ struct IModule : public IComponentType
     virtual SLANG_NO_THROW char const* SLANG_MCALL getDependencyFilePath(SlangInt32 index) = 0;
 
     virtual SLANG_NO_THROW DeclReflection* SLANG_MCALL getModuleReflection() = 0;
+
+    /** Disassemble a module.
+     */
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    disassemble(slang::IBlob** outDisassembledBlob) = 0;
 };
 
     #define SLANG_UUID_IModule IModule::getTypeGuid()
@@ -4349,6 +4637,7 @@ struct SpecializationArg
     {
         Unknown, /**< An invalid specialization argument. */
         Type,    /**< Specialize to a type. */
+        Expr,    /**< An expression representing a type or value */
     };
 
     /** The kind of specialization argument. */
@@ -4357,6 +4646,8 @@ struct SpecializationArg
     {
         /** A type specialization argument, used for `Kind::Type`. */
         TypeReflection* type;
+        /** An expression in Slang syntax, used for `Kind::Expr`. */
+        const char* expr;
     };
 
     static SpecializationArg fromType(TypeReflection* inType)
@@ -4366,12 +4657,111 @@ struct SpecializationArg
         rs.type = inType;
         return rs;
     }
+
+    static SpecializationArg fromExpr(const char* inExpr)
+    {
+        SpecializationArg rs;
+        rs.kind = Kind::Expr;
+        rs.expr = inExpr;
+        return rs;
+    }
 };
 } // namespace slang
 
     // Passed into functions to create globalSession to identify the API version client code is
     // using.
     #define SLANG_API_VERSION 0
+
+enum SlangLanguageVersion
+{
+    SLANG_LANGUAGE_VERSION_UNKNOWN = 0,
+    SLANG_LANGUAGE_VERSION_LEGACY = 2018,
+    SLANG_LANGUAGE_VERSION_2025 = 2025,
+    SLANG_LANGUAGE_VERSION_2026 = 2026,
+    SLANG_LANGAUGE_VERSION_DEFAULT = SLANG_LANGUAGE_VERSION_LEGACY,
+    SLANG_LANGUAGE_VERSION_LATEST = SLANG_LANGUAGE_VERSION_2026,
+};
+
+
+/* Description of a Slang global session.
+ */
+struct SlangGlobalSessionDesc
+{
+    /// Size of this struct.
+    uint32_t structureSize = sizeof(SlangGlobalSessionDesc);
+
+    /// Slang API version.
+    uint32_t apiVersion = SLANG_API_VERSION;
+
+    /// Specify the oldest Slang language version that any sessions will use.
+    uint32_t minLanguageVersion = SLANG_LANGUAGE_VERSION_2025;
+
+    /// Whether to enable GLSL support.
+    bool enableGLSL = false;
+
+    /// Reserved for future use.
+    uint32_t reserved[16] = {};
+};
+
+/* Create a blob from binary data.
+ *
+ * @param data Pointer to the binary data to store in the blob. Must not be null.
+ * @param size Size of the data in bytes. Must be greater than 0.
+ * @return The created blob on success, or nullptr on failure.
+ */
+SLANG_EXTERN_C SLANG_API ISlangBlob* slang_createBlob(const void* data, size_t size);
+
+/* Load a module from source code with size specification.
+ *
+ * @param session The session to load the module into.
+ * @param moduleName The name of the module.
+ * @param path The path for the module.
+ * @param source Pointer to the source code data.
+ * @param sourceSize Size of the source code data in bytes.
+ * @param outDiagnostics (out, optional) Diagnostics output.
+ * @return The loaded module on success, or nullptr on failure.
+ */
+SLANG_EXTERN_C SLANG_API slang::IModule* slang_loadModuleFromSource(
+    slang::ISession* session,
+    const char* moduleName,
+    const char* path,
+    const char* source,
+    size_t sourceSize,
+    ISlangBlob** outDiagnostics = nullptr);
+
+/** Load a module from IR data.
+ * @param session The session to load the module into.
+ * @param moduleName Name of the module to load.
+ * @param path Path for the module (used for diagnostics).
+ * @param source IR data containing the module.
+ * @param sourceSize Size of the IR data in bytes.
+ * @param outDiagnostics (out, optional) Diagnostics output.
+ * @return The loaded module on success, or nullptr on failure.
+ */
+SLANG_EXTERN_C SLANG_API slang::IModule* slang_loadModuleFromIRBlob(
+    slang::ISession* session,
+    const char* moduleName,
+    const char* path,
+    const void* source,
+    size_t sourceSize,
+    ISlangBlob** outDiagnostics = nullptr);
+
+/** Read module info (name and version) from IR data.
+ * @param session The session to use for loading module info.
+ * @param source IR data containing the module.
+ * @param sourceSize Size of the IR data in bytes.
+ * @param outModuleVersion (out) Module version number.
+ * @param outModuleCompilerVersion (out) Compiler version that created the module.
+ * @param outModuleName (out) Name of the module.
+ * @return SLANG_OK on success, or an error code on failure.
+ */
+SLANG_EXTERN_C SLANG_API SlangResult slang_loadModuleInfoFromIRBlob(
+    slang::ISession* session,
+    const void* source,
+    size_t sourceSize,
+    SlangInt& outModuleVersion,
+    const char*& outModuleCompilerVersion,
+    const char*& outModuleName);
 
 /* Create a global session, with the built-in core module.
 
@@ -4380,6 +4770,16 @@ struct SpecializationArg
 */
 SLANG_EXTERN_C SLANG_API SlangResult
 slang_createGlobalSession(SlangInt apiVersion, slang::IGlobalSession** outGlobalSession);
+
+
+/* Create a global session, with the built-in core module.
+
+@param desc Description of the global session.
+@param outGlobalSession (out)The created global session.
+*/
+SLANG_EXTERN_C SLANG_API SlangResult slang_createGlobalSession2(
+    const SlangGlobalSessionDesc* desc,
+    slang::IGlobalSession** outGlobalSession);
 
 /* Create a global session, but do not set up the core module. The core module can
 then be loaded via loadCoreModule or compileCoreModule
@@ -4408,15 +4808,149 @@ SLANG_API ISlangBlob* slang_getEmbeddedCoreModule();
  */
 SLANG_EXTERN_C SLANG_API void slang_shutdown();
 
+/* Return the last signaled internal error message.
+ */
+SLANG_EXTERN_C SLANG_API const char* slang_getLastInternalErrorMessage();
+
+// Slang VM
+namespace slang
+{
+
+enum class OperandDataType
+{
+    General = 0, // General data type, can be any type.
+    Int32 = 1,   // 32-bit integer.
+    Int64 = 2,   // 64-bit integer.
+    Float32 = 3, // 32-bit floating-point number.
+    Float64 = 4, // 64-bit floating-point number.
+    String = 5,  // String data type, represented as a pointer to a null-terminated string.
+};
+
+struct VMExecOperand
+{
+    uint8_t** section; // Pointer to the section start pointer.
+    #if SLANG_PTR_IS_32
+    uint32_t padding;
+    #endif
+    uint32_t type : 8; // type of the operand data.
+    uint32_t size : 24;
+    uint32_t offset;
+    void* getPtr() const { return *section + offset; }
+    OperandDataType getType() const { return (OperandDataType)type; }
+};
+
+struct VMExecInstHeader;
+class IByteCodeRunner;
+
+typedef void (*VMExtFunction)(IByteCodeRunner* context, VMExecInstHeader* inst, void* userData);
+typedef void (*VMPrintFunc)(const char* message, void* userData);
+
+struct VMExecInstHeader
+{
+    VMExtFunction functionPtr; // Pointer to the function that executes this instruction.
+    #if SLANG_PTR_IS_32
+    uint32_t padding;
+    #endif
+    uint32_t opcodeExtension;
+    uint32_t operandCount;
+    VMExecInstHeader* getNextInst()
+    {
+        return (VMExecInstHeader*)((VMExecOperand*)(this + 1) + operandCount);
+    }
+    VMExecOperand& getOperand(SlangInt index) const
+    {
+        return *((VMExecOperand*)(this + 1) + index);
+    }
+};
+
+struct ByteCodeFuncInfo
+{
+    uint32_t parameterCount;
+    uint32_t returnValueSize;
+};
+
+struct ByteCodeRunnerDesc
+{
+    /** The size of this structure, in bytes.
+     */
+    size_t structSize = sizeof(ByteCodeRunnerDesc);
+};
+
+/// Represents a byte code runner that can execute Slang byte code.
+class IByteCodeRunner : public ISlangUnknown
+{
+public:
+    // {AFDAB195-361F-42CB-9513-9006261DD8CD}
+    SLANG_COM_INTERFACE(0xafdab195, 0x361f, 0x42cb, {0x95, 0x13, 0x90, 0x6, 0x26, 0x1d, 0xd8, 0xcd})
+
+    /// Load a byte code module into the execution context.
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL loadModule(IBlob* moduleBlob) = 0;
+
+    /// Select a function for execution.
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    selectFunctionByIndex(uint32_t functionIndex) = 0;
+
+    virtual SLANG_NO_THROW int SLANG_MCALL findFunctionByName(const char* name) = 0;
+
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    getFunctionInfo(uint32_t index, ByteCodeFuncInfo* outInfo) = 0;
+
+    /// Obtain the current working set memory for the selected function.
+    virtual SLANG_NO_THROW void* SLANG_MCALL getCurrentWorkingSet() = 0;
+
+    /// Execute the selected function.
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    execute(void* argumentData, size_t argumentSize) = 0;
+
+    /// Query the error string.
+    virtual SLANG_NO_THROW void SLANG_MCALL getErrorString(IBlob** outBlob) = 0;
+
+    /// Retrieve the return value of the last executed function.
+    virtual SLANG_NO_THROW void* SLANG_MCALL getReturnValue(size_t* outValueSize) = 0;
+
+    /// Set the user data for the external instruction handler.
+    virtual SLANG_NO_THROW void SLANG_MCALL setExtInstHandlerUserData(void* userData) = 0;
+
+    /// Register an external function that can be called from the byte code.
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    registerExtCall(const char* name, VMExtFunction functionPtr) = 0;
+
+    /// Set a callback function to print messages from the byte code runner.
+    virtual SLANG_NO_THROW SlangResult SLANG_MCALL
+    setPrintCallback(VMPrintFunc callback, void* userData) = 0;
+};
+
+} // namespace slang
+
+/// Create a byte code runner that can execute Slang byte code.
+SLANG_EXTERN_C SLANG_API SlangResult slang_createByteCodeRunner(
+    const slang::ByteCodeRunnerDesc* desc,
+    slang::IByteCodeRunner** outByteCodeRunner);
+
+/// Disassemble a Slang byte code blob into human-readable text.
+SLANG_EXTERN_C SLANG_API SlangResult
+slang_disassembleByteCode(slang::IBlob* moduleBlob, slang::IBlob** outDisassemblyBlob);
+
 namespace slang
 {
 inline SlangResult createGlobalSession(slang::IGlobalSession** outGlobalSession)
 {
-    return slang_createGlobalSession(SLANG_API_VERSION, outGlobalSession);
+    SlangGlobalSessionDesc defaultDesc = {};
+    return slang_createGlobalSession2(&defaultDesc, outGlobalSession);
+}
+inline SlangResult createGlobalSession(
+    const SlangGlobalSessionDesc* desc,
+    slang::IGlobalSession** outGlobalSession)
+{
+    return slang_createGlobalSession2(desc, outGlobalSession);
 }
 inline void shutdown()
 {
     slang_shutdown();
+}
+inline const char* getLastInternalErrorMessage()
+{
+    return slang_getLastInternalErrorMessage();
 }
 } // namespace slang
 

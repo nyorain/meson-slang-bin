@@ -13,10 +13,10 @@ inc_slang = include_directories('include')
 lib_slang = disabler()
 
 if build_machine.system() == 'linux'
-	lib_slang = cc.find_library('slang', dirs:
+	lib_slang = cc.find_library('slang-compiler', dirs:
 		meson.current_source_dir() + '/lib/linux')
 elif build_machine.system() == 'windows'
-	lib_slang = cc.find_library('slang', dirs:
+	lib_slang = cc.find_library('slang-compiler', dirs:
 		meson.current_source_dir() + '/lib/win64')
 endif
 
